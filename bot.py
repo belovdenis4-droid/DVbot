@@ -30,6 +30,8 @@ BITRIX_TOKEN = os.environ.get("BITRIX_TOKEN")
 BITRIX_BOT_ID = os.environ.get("BITRIX_BOT_ID") # ID вашего бота из Битрикс
 BITRIX_CLIENT_ID = os.environ.get("BITRIX_CLIENT_ID")
 BITRIX_EVENT_HANDLER_URL = os.environ.get("BITRIX_EVENT_HANDLER_URL")
+BITRIX_APP_ACCESS_TOKEN = os.environ.get("BITRIX_APP_ACCESS_TOKEN")
+BITRIX_PORTAL_URL = os.environ.get("BITRIX_PORTAL_URL")
 BITRIX_CLIENT_IDS = [c.strip() for c in os.environ.get("BITRIX_CLIENT_IDS", "").split(",") if c.strip()]
 if BITRIX_CLIENT_ID:
     BITRIX_CLIENT_IDS.append(BITRIX_CLIENT_ID)
@@ -142,6 +144,13 @@ def process_and_save(markdown_text):
             logger.error(f"Ошибка при добавлении строк в Google Sheet (main_data_sheet): {e}", exc_info=True)
             return 0
     return 0
+
+def get_bitrix_portal_url():
+    if BITRIX_PORTAL_URL:
+        return BITRIX_PORTAL_URL.rstrip("/")
+    if BITRIX_URL and "/rest/" in BITRIX_URL:
+        return BITRIX_URL.split("/rest/")[0]
+    return None
 
 # ---------- БИТРИКС24 ----------
 
@@ -556,8 +565,16 @@ async def check_bitrix(update: Update, context):
                         "event": "ONIMMESSAGEADD",
                         "handler": BITRIX_EVENT_HANDLER_URL,
                     }
-                    bind_url = f"{base_url_for_check}/event.bind.json"
-                    bind_res = requests.post(bind_url, json=bind_payload).json()
+                    if BITRIX_APP_ACCESS_TOKEN:
+                        portal_url = get_bitrix_portal_url()
+                        if not portal_url:
+                            await update.message.reply_text("⚠️ Не задан BITRIX_PORTAL_URL, не могу вызвать event.bind.")
+                            return
+                        bind_url = f"{portal_url}/rest/event.bind.json"
+                        bind_res = requests.post(bind_url, params={"auth": BITRIX_APP_ACCESS_TOKEN}, json=bind_payload).json()
+                    else:
+                        bind_url = f"{base_url_for_check}/event.bind.json"
+                        bind_res = requests.post(bind_url, json=bind_payload).json()
                     if bind_res.get("result") is True:
                         await update.message.reply_text("🚀 Событие ONIMMESSAGEADD успешно зарегистрировано.")
                     elif bind_res.get("error") == "ERROR_EVENT_ALREADY_INSTALLED":
