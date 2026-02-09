@@ -184,10 +184,24 @@ def bitrix_webhook():
             if len(value) <= 6:
                 return f"{value[0]}...{value[-1]}(len={len(value)})"
             return f"{value[:3]}...{value[-3:]}(len={len(value)})"
+        auth_client_id = (
+            data.get('auth[client_id]')
+            or json_data.get('auth[client_id]')
+            or (json_data.get('auth') or {}).get('client_id')
+        )
+        auth_app_id = (
+            data.get('auth[application_id]')
+            or json_data.get('auth[application_id]')
+            or (json_data.get('auth') or {}).get('application_id')
+        )
+        client_id_query = request.args.get('CLIENT_ID')
         logger.warning(
-            "Неверный токен авторизации. req=%s env=%s",
+            "Неверный токен авторизации. req=%s env=%s auth_client_id=%s auth_app_id=%s query_client_id=%s",
             _mask_token(token_from_request),
             _mask_token(BITRIX_TOKEN),
+            _mask_token(auth_client_id),
+            _mask_token(auth_app_id),
+            _mask_token(client_id_query),
         )
         return "Forbidden", 403
 
