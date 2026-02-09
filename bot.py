@@ -177,7 +177,18 @@ def bitrix_webhook():
         or (json_data.get('auth') or {}).get('application_token')
     )
     if token_from_request != BITRIX_TOKEN:
-        logger.warning("Неверный токен авторизации.")
+        def _mask_token(value):
+            if not value:
+                return "none"
+            value = str(value)
+            if len(value) <= 6:
+                return f"{value[0]}...{value[-1]}(len={len(value)})"
+            return f"{value[:3]}...{value[-3:]}(len={len(value)})"
+        logger.warning(
+            "Неверный токен авторизации. req=%s env=%s",
+            _mask_token(token_from_request),
+            _mask_token(BITRIX_TOKEN),
+        )
         return "Forbidden", 403
 
     # 2. Обработка событий: ONIMBOTMESSAGEADD (сообщения боту) и ONIMMESSAGEADD (обычные сообщения в чате)
