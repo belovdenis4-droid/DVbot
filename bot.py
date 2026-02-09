@@ -63,6 +63,11 @@ except gspread.exceptions.WorksheetNotFound:
 
 app = Flask(__name__)
 
+# Главная страница для Bitrix iframe
+@app.route('/', methods=['GET'])
+def index():
+    return "Бот активен и слушает события Битрикс24 (локальное приложение).", 200
+
 # ---------- ОБЩАЯ ЛОГИКА ОБРАБОТКИ ----------
 
 def get_text_llama_parse(file_path):
