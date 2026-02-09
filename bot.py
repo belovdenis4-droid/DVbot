@@ -288,10 +288,12 @@ def bitrix_webhook():
         event_data = json_data.get('data') or {}
         params_data = event_data.get('PARAMS') or {}
         form_params = {}
+        form_param_keys = []
         for key in data.keys():
             if key.startswith("data[PARAMS][") and key.endswith("]"):
                 inner_key = key[len("data[PARAMS]["):-1]
                 form_params[inner_key] = data.get(key)
+                form_param_keys.append(inner_key)
         if form_params:
             params_data = {**form_params, **params_data}
 
@@ -335,6 +337,9 @@ def bitrix_webhook():
         file_ids = []
         for value in candidate_values:
             file_ids.extend(_extract_file_ids(value))
+        for raw_key in form_param_keys:
+            if any(tag in raw_key.upper() for tag in ["FILE", "ATTACH"]):
+                file_ids.extend(re.findall(r"\d+", raw_key))
         file_ids = [fid for fid in file_ids if fid and fid.lower() != "none"]
         if file_ids:
             files_data = {fid: {} for fid in dict.fromkeys(file_ids)}
