@@ -1,0 +1,6 @@
+498a86f2f3615c5d178ac83cd65ae0da04292d55 10e58ef038735edccce27803608fe04ed32e4fa5 belovdenis4 <39287562-belovdenis4@users.noreply.replit.com> 1770542533 +0000	commit: Add a command to check the connection with Bitrix24
+10e58ef038735edccce27803608fe04ed32e4fa5 9e0af432f2b7274355105fb8ad1c20626a0ba3c5 belovdenis4 <39287562-belovdenis4@users.noreply.replit.com> 1770542694 +0000	commit: Improve Bitrix24 webhook URL handling for reliable communication
+9e0af432f2b7274355105fb8ad1c20626a0ba3c5 cd1437bef42b12baf3eda9f64778d416f1828dc7 belovdenis4 <39287562-belovdenis4@users.noreply.replit.com> 1770543165 +0000	commit: Improve Bitrix24 connection check by correctly formatting webhook URLs
+cd1437bef42b12baf3eda9f64778d416f1828dc7 08614d4a9cf891473e7f00086655b0656bb38a0d belovdenis4-droid <belovdenis4@gmail.com> 1770632266 +0000	commit: init
+08614d4a9cf891473e7f00086655b0656bb38a0d d196f881807e540aca357563f25b932cce73e892 belovdenis4-droid <belovdenis4@gmail.com> 1770632786 +0000	commit: init
+d196f881807e540aca357563f25b932cce73e892 d196f881807e540aca357563f25b932cce73e892 belovdenis4-droid <belovdenis4@gmail.com> 1770632786 +0000	Branch: renamed refs/heads/main to refs/heads/main

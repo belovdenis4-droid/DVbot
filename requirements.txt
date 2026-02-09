@@ -1,0 +1,9 @@
+python-telegram-bot==21.6
+pypdf
+pdf2image
+pytesseract
+Pillow
+gspread
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
