@@ -438,6 +438,12 @@ def bitrix_webhook():
                     response = f"✅ Система работает. Ошибка получения данных с основного листа: {e}"
                 bitrix_send_message(dialog_id_for_response, response)
 
+            elif message_text.lower() in ["chat_id", "chatid"]: 
+                bitrix_send_message(
+                    dialog_id_for_response,
+                    f"ID чата: {chat_id}\nDIALOG_ID: {dialog_id_for_response}"
+                )
+
             elif message_text.lower() in ["помощь", "help"]: 
                 bitrix_send_message(
                     dialog_id_for_response,
