@@ -214,7 +214,7 @@ def bitrix_webhook():
     json_data = request.get_json(silent=True) or {}
     # Локальное приложение: Bitrix может вызывать обработчик без event
     if not (data.get('event') or json_data.get('event')):
-        if data.get('APP_SID'):
+        if data.get('APP_SID') or request.args.get('APP_SID'):
             logger.info(f"Bitrix APP_SID ping: {data.get('APP_SID')}")
             return "OK", 200
         if data.get('auth[client_id]') or (json_data.get('auth') or {}).get('client_id'):
