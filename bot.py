@@ -196,6 +196,10 @@ def bitrix_webhook():
         return "OK", 200
     data = request.form
     json_data = request.get_json(silent=True) or {}
+    # Локальное приложение: Bitrix может вызывать обработчик без event
+    if not (data.get('event') or json_data.get('event')):
+        if data.get('auth[client_id]') or (json_data.get('auth') or {}).get('client_id'):
+            return "OK", 200
     
     # 1. Проверка токена (безопасность)
     token_from_request = (
