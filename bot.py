@@ -149,6 +149,8 @@ def bitrix_send_message(dialog_id, text):
                 "DIALOG_ID": dialog_id,
                 "MESSAGE": text,
             }
+            if BITRIX_CLIENT_ID:
+                bot_payload["CLIENT_ID"] = BITRIX_CLIENT_ID
             logger.info(f"Отправка сообщения (бот) в Битрикс: URL={bot_url}, Payload={bot_payload}")
             bot_response = requests.post(bot_url, json=bot_payload)
             if bot_response.ok:
@@ -264,12 +266,17 @@ def bitrix_webhook():
         try:
             msg_url = f"{BITRIX_URL.rstrip('/')}/im.message.getById.json"
             msg_res = requests.get(msg_url, params={"ID": message_id})
+            if msg_res.status_code == 404:
+                alt_url = f"{BITRIX_URL.rstrip('/')}/im.message.get.json"
+                msg_res = requests.get(alt_url, params={"MESSAGE_ID": message_id})
             msg_res.raise_for_status()
             msg_json = msg_res.json()
             if "result" in msg_json:
                 result = msg_json.get('result', {})
                 if isinstance(result, dict) and str(message_id) in result:
                     msg_data = result.get(str(message_id), {})
+                elif isinstance(result, list) and result:
+                    msg_data = result[0]
                 else:
                     msg_data = result
                 files_data = msg_data.get('FILES', {})
