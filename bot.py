@@ -352,9 +352,13 @@ def bitrix_webhook():
 
         # --- Обработка вложений (файлов) ---
         if files_data:
-            bitrix_send_message(dialog_id_for_response, "⏳ Начинаю распознавание файла...")
-            
-            for f_id, f_info in files_data.items():
+            valid_file_ids = [f_id for f_id in files_data.keys() if str(f_id).isdigit()]
+            if not valid_file_ids:
+                logger.info("Нет корректных числовых ID файлов в событии.")
+            else:
+                bitrix_send_message(dialog_id_for_response, "⏳ Начинаю распознавание файла...")
+
+            for f_id in valid_file_ids:
                 try:
                     # Получаем URL для скачивания файла
                     disk_file_info_url = f"{BITRIX_URL.rstrip('/')}/disk.file.get.json"
@@ -379,12 +383,12 @@ def bitrix_webhook():
                         bitrix_send_message(dialog_id_for_response, f"✅ Битрикс: добавлено строк: {count} на основной лист.")
                         if os.path.exists(path): os.remove(path)
                     else:
-                        logger.warning(f"Файл {file_name} не является PDF или ссылка на скачивание отсутствует.")
-                        bitrix_send_message(dialog_id_for_response, f"⚠️ Не удалось обработать файл: {file_name}. Убедитесь, что это PDF.")
+                        logger.info(f"Пропускаю файл не PDF или без ссылки: {file_name}.")
                         
                 except Exception as e:
                     logger.error(f"Ошибка обработки файла {file_name} (ID: {f_id}): {e}", exc_info=True)
-                    bitrix_send_message(dialog_id_for_response, f"❌ Произошла ошибка при обработке файла {file_name}.")
+                    # Не спамим пользователя, если пришли некорректные ID или не-PDF
+                    continue
         
         # --- Обработка текстовых команд ---
         message_text = (
