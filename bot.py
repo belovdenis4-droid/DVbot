@@ -263,50 +263,80 @@ def bitrix_webhook():
 
         # Получаем информацию о сообщении (включая файлы)
         files_data = {}
-        try:
-            msg_url = f"{BITRIX_URL.rstrip('/')}/im.message.getById.json"
-            msg_res = requests.get(msg_url, params={"ID": message_id})
-            if msg_res.status_code == 404:
-                alt_url = f"{BITRIX_URL.rstrip('/')}/im.message.get.json"
-                msg_res = requests.get(alt_url, params={"MESSAGE_ID": message_id})
-            msg_res.raise_for_status()
-            msg_json = msg_res.json()
-            if "result" in msg_json:
-                result = msg_json.get('result', {})
-                if isinstance(result, dict) and str(message_id) in result:
-                    msg_data = result.get(str(message_id), {})
-                elif isinstance(result, list) and result:
-                    msg_data = result[0]
-                else:
-                    msg_data = result
-                files_data = msg_data.get('FILES', {})
-            else:
-                logger.error(f"Bitrix API error im.message.getById: {msg_json}")
-        except Exception as e:
-            logger.error(f"Не удалось получить информацию о сообщении {message_id}: {e}", exc_info=True)
-            bitrix_send_message(
-                dialog_id_for_response,
-                "⚠️ Не удалось получить информацию о вложении. "
-                "Проверьте права входящего вебхука (IM, Disk, IMBot) и попробуйте отправить PDF как файл."
-            )
+        event_data = json_data.get('data') or {}
+        params_data = event_data.get('PARAMS') or {}
 
-        # Фолбэк: пробуем вытащить файлы прямо из payload события
+        def _extract_file_ids(value):
+            ids = []
+            if not value:
+                return ids
+            if isinstance(value, dict):
+                if "id" in value or "ID" in value:
+                    ids.append(str(value.get("id") or value.get("ID")))
+                else:
+                    ids.extend([str(k) for k in value.keys()])
+            elif isinstance(value, list):
+                for item in value:
+                    ids.extend(_extract_file_ids(item))
+            elif isinstance(value, str):
+                parts = [p.strip() for p in value.replace(";", ",").split(",") if p.strip()]
+                ids.extend(parts)
+            else:
+                ids.append(str(value))
+            return ids
+
+        # Сначала пытаемся извлечь ID файлов прямо из payload события
+        candidate_values = [
+            params_data.get("FILES"),
+            params_data.get("FILE_ID"),
+            params_data.get("FILE_IDS"),
+            params_data.get("FILEID"),
+            params_data.get("FILEIDS"),
+            params_data.get("ATTACH"),
+            params_data.get("ATTACH_ID"),
+            params_data.get("ATTACH_IDS"),
+            params_data.get("ATTACHES"),
+            event_data.get("FILES"),
+            event_data.get("FILE_ID"),
+            event_data.get("FILE_IDS"),
+        ]
+        file_ids = []
+        for value in candidate_values:
+            file_ids.extend(_extract_file_ids(value))
+        file_ids = [fid for fid in file_ids if fid and fid.lower() != "none"]
+        if file_ids:
+            files_data = {fid: {} for fid in dict.fromkeys(file_ids)}
+        else:
+            logger.info("Bitrix payload params keys: %s", list(params_data.keys()))
+
+        # Если из payload не удалось — пробуем получить сообщение через API
         if not files_data:
-            files_from_payload = (
-                data.get('data[PARAMS][FILES]')
-                or (json_data.get('data') or {}).get('PARAMS', {}).get('FILES')
-            )
-            if files_from_payload:
-                if isinstance(files_from_payload, dict):
-                    files_data = files_from_payload
-                elif isinstance(files_from_payload, list):
-                    files_data = {
-                        str(item.get("id") or item.get("ID") or item): item
-                        for item in files_from_payload
-                    }
-                elif isinstance(files_from_payload, str):
-                    file_ids = [s.strip() for s in files_from_payload.split(",") if s.strip()]
-                    files_data = {f_id: {} for f_id in file_ids}
+            try:
+                msg_url = f"{BITRIX_URL.rstrip('/')}/im.message.getById.json"
+                msg_res = requests.get(msg_url, params={"ID": message_id})
+                if msg_res.status_code == 404:
+                    alt_url = f"{BITRIX_URL.rstrip('/')}/im.message.get.json"
+                    msg_res = requests.get(alt_url, params={"MESSAGE_ID": message_id})
+                msg_res.raise_for_status()
+                msg_json = msg_res.json()
+                if "result" in msg_json:
+                    result = msg_json.get('result', {})
+                    if isinstance(result, dict) and str(message_id) in result:
+                        msg_data = result.get(str(message_id), {})
+                    elif isinstance(result, list) and result:
+                        msg_data = result[0]
+                    else:
+                        msg_data = result
+                    files_data = msg_data.get('FILES', {})
+                else:
+                    logger.error(f"Bitrix API error im.message.getById: {msg_json}")
+            except Exception as e:
+                logger.error(f"Не удалось получить информацию о сообщении {message_id}: {e}", exc_info=True)
+                bitrix_send_message(
+                    dialog_id_for_response,
+                    "⚠️ Не удалось получить информацию о вложении. "
+                    "Проверьте права входящего вебхука (IM, Disk, IMBot) и попробуйте отправить PDF как файл."
+                )
 
         # --- Обработка вложений (файлов) ---
         if files_data:
