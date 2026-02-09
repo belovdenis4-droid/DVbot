@@ -39,11 +39,11 @@ creds = Credentials.from_service_account_info(creds_dict, scopes=["https://www.g
 gc = gspread.authorize(creds)
 spreadsheet = gc.open_by_key(SPREADSHEET_ID)
 
-# Основной лист для данных из PDF (предполагаем, что это "Sheet1" или первый лист)
+# Основной лист для данных из PDF
 try:
-    main_data_sheet = spreadsheet.worksheet("Sheet1") 
+    main_data_sheet = spreadsheet.worksheet("Лист1")
 except gspread.exceptions.WorksheetNotFound:
-    logger.warning("Worksheet 'Sheet1' not found, using first available sheet for main data.")
+    logger.warning("Worksheet 'Лист1' not found, using first available sheet for main data.")
     main_data_sheet = spreadsheet.get_worksheet(0)
 
 # Лист для тестовых сообщений
