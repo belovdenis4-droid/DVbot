@@ -208,14 +208,17 @@ def bitrix_send_message(dialog_id, text):
 @app.route('/bitrix', methods=['GET', 'POST'])
 def bitrix_webhook():
     if request.method == 'GET':
+        logger.info(f"Bitrix GET /bitrix query={dict(request.args)}")
         return "OK", 200
     data = request.form
     json_data = request.get_json(silent=True) or {}
     # Локальное приложение: Bitrix может вызывать обработчик без event
     if not (data.get('event') or json_data.get('event')):
         if data.get('APP_SID'):
+            logger.info(f"Bitrix APP_SID ping: {data.get('APP_SID')}")
             return "OK", 200
         if data.get('auth[client_id]') or (json_data.get('auth') or {}).get('client_id'):
+            logger.info("Bitrix app ping with auth client_id")
             return "OK", 200
     
     # 1. Проверка токена (безопасность)
