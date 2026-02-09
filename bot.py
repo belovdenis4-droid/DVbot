@@ -549,31 +549,31 @@ async def check_bitrix(update: Update, context):
                 await update.message.reply_text(f"⚠️ Ошибка при отправке сообщения в Битрикс: {error_description}")
                 logger.error(f"Ошибка Bitrix API при отправке сообщения: {error_description}. Полный ответ: {bitrix_add_result}")
 
-        # Регистрируем событие ONIMMESSAGEADD, если указан handler URL
-        if BITRIX_EVENT_HANDLER_URL:
-            try:
-                bind_payload = {
-                    "event": "ONIMMESSAGEADD",
-                    "handler": BITRIX_EVENT_HANDLER_URL,
-                }
-                bind_url = f"{base_url_for_check}/event.bind.json"
-                bind_res = requests.post(bind_url, json=bind_payload).json()
-                if bind_res.get("result") is True:
-                    await update.message.reply_text("🚀 Событие ONIMMESSAGEADD успешно зарегистрировано.")
-                elif bind_res.get("error") == "ERROR_EVENT_ALREADY_INSTALLED":
-                    await update.message.reply_text("✅ Событие ONIMMESSAGEADD уже было зарегистрировано.")
-                else:
-                    err_desc = bind_res.get("error_description", bind_res.get("error", "Неизвестная ошибка"))
-                    await update.message.reply_text(f"⚠️ Не удалось зарегистрировать событие: {err_desc}")
-                    logger.error(f"Ошибка event.bind: {bind_res}")
-            except Exception as e:
-                await update.message.reply_text(f"⚠️ Ошибка регистрации события: {e}")
-                logger.error(f"Ошибка event.bind: {e}", exc_info=True)
-        else:
-            await update.message.reply_text(
-                "ℹ️ Не задан BITRIX_EVENT_HANDLER_URL. "
-                "Если нужно зарегистрировать ONIMMESSAGEADD, добавьте этот секрет."
-            )
+            # Регистрируем событие ONIMMESSAGEADD, если указан handler URL
+            if BITRIX_EVENT_HANDLER_URL:
+                try:
+                    bind_payload = {
+                        "event": "ONIMMESSAGEADD",
+                        "handler": BITRIX_EVENT_HANDLER_URL,
+                    }
+                    bind_url = f"{base_url_for_check}/event.bind.json"
+                    bind_res = requests.post(bind_url, json=bind_payload).json()
+                    if bind_res.get("result") is True:
+                        await update.message.reply_text("🚀 Событие ONIMMESSAGEADD успешно зарегистрировано.")
+                    elif bind_res.get("error") == "ERROR_EVENT_ALREADY_INSTALLED":
+                        await update.message.reply_text("✅ Событие ONIMMESSAGEADD уже было зарегистрировано.")
+                    else:
+                        err_desc = bind_res.get("error_description", bind_res.get("error", "Неизвестная ошибка"))
+                        await update.message.reply_text(f"⚠️ Не удалось зарегистрировать событие: {err_desc}")
+                        logger.error(f"Ошибка event.bind: {bind_res}")
+                except Exception as e:
+                    await update.message.reply_text(f"⚠️ Ошибка регистрации события: {e}")
+                    logger.error(f"Ошибка event.bind: {e}", exc_info=True)
+            else:
+                await update.message.reply_text(
+                    "ℹ️ Не задан BITRIX_EVENT_HANDLER_URL. "
+                    "Если нужно зарегистрировать ONIMMESSAGEADD, добавьте этот секрет."
+                )
             
         else:
             error_description = res.get('error_description', res.get('error', 'Неизвестная ошибка Bitrix24'))
