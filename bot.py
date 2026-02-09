@@ -261,6 +261,27 @@ def bitrix_webhook():
             logger.error("Не удалось определить DIALOG_ID для ответа.")
             return "OK"
 
+        # Текст сообщения нужен раньше (например, для упоминаний в группах)
+        message_text = (
+            data.get('data[PARAMS][MESSAGE]')
+            or (json_data.get('data') or {}).get('PARAMS', {}).get('MESSAGE')
+            or ''
+        ).strip()
+
+        def is_bot_mentioned(text):
+            if not text:
+                return False
+            text_lower = text.lower()
+            if BITRIX_BOT_ID:
+                if f"[user={str(BITRIX_BOT_ID).lower()}]" in text_lower:
+                    return True
+                if f"[bot={str(BITRIX_BOT_ID).lower()}]" in text_lower:
+                    return True
+            mention_alias = os.environ.get("BITRIX_BOT_MENTION", "").strip()
+            if mention_alias and f"@{mention_alias.lower()}" in text_lower:
+                return True
+            return False
+
         # Получаем информацию о сообщении (включая файлы)
         files_data = {}
         event_data = json_data.get('data') or {}
@@ -352,6 +373,14 @@ def bitrix_webhook():
 
         # --- Обработка вложений (файлов) ---
         if files_data:
+            if event == 'ONIMMESSAGEADD' and not is_bot_mentioned(message_text):
+                bitrix_send_message(
+                    dialog_id_for_response,
+                    "ℹ️ Чтобы обработать PDF в групповом чате, упомяните бота в тексте сообщения "
+                    "(например, @dvbot) и приложите файл."
+                )
+                return "OK", 200
+
             valid_file_ids = [f_id for f_id in files_data.keys() if str(f_id).isdigit()]
             if not valid_file_ids:
                 logger.info("Нет корректных числовых ID файлов в событии.")
@@ -391,11 +420,6 @@ def bitrix_webhook():
                     continue
         
         # --- Обработка текстовых команд ---
-        message_text = (
-            data.get('data[PARAMS][MESSAGE]')
-            or (json_data.get('data') or {}).get('PARAMS', {}).get('MESSAGE')
-            or ''
-        ).strip()
         if message_text:
             if message_text.lower() == "статус": 
                 try:
