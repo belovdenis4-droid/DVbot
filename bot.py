@@ -265,6 +265,13 @@ def bitrix_webhook():
         files_data = {}
         event_data = json_data.get('data') or {}
         params_data = event_data.get('PARAMS') or {}
+        form_params = {}
+        for key in data.keys():
+            if key.startswith("data[PARAMS][") and key.endswith("]"):
+                inner_key = key[len("data[PARAMS]["):-1]
+                form_params[inner_key] = data.get(key)
+        if form_params:
+            params_data = {**form_params, **params_data}
 
         def _extract_file_ids(value):
             ids = []
@@ -300,6 +307,9 @@ def bitrix_webhook():
             event_data.get("FILE_ID"),
             event_data.get("FILE_IDS"),
         ]
+        for key, value in params_data.items():
+            if any(tag in key.upper() for tag in ["FILE", "ATTACH"]):
+                candidate_values.append(value)
         file_ids = []
         for value in candidate_values:
             file_ids.extend(_extract_file_ids(value))
@@ -308,6 +318,8 @@ def bitrix_webhook():
             files_data = {fid: {} for fid in dict.fromkeys(file_ids)}
         else:
             logger.info("Bitrix payload params keys: %s", list(params_data.keys()))
+            if form_params:
+                logger.info("Bitrix form params keys: %s", list(form_params.keys()))
 
         # Если из payload не удалось — пробуем получить сообщение через API
         if not files_data:
