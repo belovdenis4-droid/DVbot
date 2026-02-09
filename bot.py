@@ -306,8 +306,13 @@ def bitrix_webhook():
                     response = f"✅ Система работает. Ошибка получения данных с основного листа: {e}"
                 bitrix_send_message(dialog_id_for_response, response)
 
-            elif message_text.lower() == "помощь": 
-                bitrix_send_message(dialog_id_for_response, "Доступные команды: 'статус', 'помощь'. Я также автоматически обрабатываю PDF-файлы, отправленные мне в чат.")
+            elif message_text.lower() in ["помощь", "help"]: 
+                bitrix_send_message(
+                    dialog_id_for_response,
+                    "Доступные команды: 'статус', 'помощь' (или 'help'). "
+                    "Я автоматически распознаю PDF-файлы, отправленные мне в чат, "
+                    "и добавляю результаты в Google Таблицу: лист 'Лист1'."
+                )
             
             # НОВОЕ: БЛОК: Запись любого другого текста в таблицу "Тест"
             else:
