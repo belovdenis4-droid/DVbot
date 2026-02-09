@@ -29,6 +29,9 @@ BITRIX_URL = os.environ.get("BITRIX_WEBHOOK_URL")
 BITRIX_TOKEN = os.environ.get("BITRIX_TOKEN")
 BITRIX_BOT_ID = os.environ.get("BITRIX_BOT_ID") # ID вашего бота из Битрикс
 BITRIX_CLIENT_ID = os.environ.get("BITRIX_CLIENT_ID")
+BITRIX_CLIENT_IDS = [c.strip() for c in os.environ.get("BITRIX_CLIENT_IDS", "").split(",") if c.strip()]
+if BITRIX_CLIENT_ID:
+    BITRIX_CLIENT_IDS.append(BITRIX_CLIENT_ID)
 
 # ID разрешенных чатов Битрикс (для ONIMMESSAGEADD), если используется
 ALLOWED_BX_CHATS = os.environ.get("ALLOWED_BITRIX_CHATS", "").replace(" ", "").split(",")
@@ -214,7 +217,7 @@ def bitrix_webhook():
     request_client_id = auth_client_id or client_id_query
 
     token_ok = token_from_request == BITRIX_TOKEN
-    client_ok = bool(BITRIX_CLIENT_ID and request_client_id == BITRIX_CLIENT_ID)
+    client_ok = bool(request_client_id and request_client_id in BITRIX_CLIENT_IDS)
     if not (token_ok or client_ok):
         def _mask_token(value):
             if not value:
