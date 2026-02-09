@@ -187,8 +187,10 @@ def bitrix_send_message(dialog_id, text):
     except Exception as e:
         logger.error(f"Общая ошибка при отправке сообщения в Битрикс: {e}", exc_info=True)
 
-@app.route('/bitrix', methods=['POST'])
+@app.route('/bitrix', methods=['GET', 'POST'])
 def bitrix_webhook():
+    if request.method == 'GET':
+        return "OK", 200
     data = request.form
     json_data = request.get_json(silent=True) or {}
     
