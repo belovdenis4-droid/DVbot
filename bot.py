@@ -32,6 +32,7 @@ BITRIX_CLIENT_ID = os.environ.get("BITRIX_CLIENT_ID")
 
 # ID разрешенных чатов Битрикс (для ONIMMESSAGEADD), если используется
 ALLOWED_BX_CHATS = os.environ.get("ALLOWED_BITRIX_CHATS", "").replace(" ", "").split(",")
+BITRIX_GROUP_AUTO = os.environ.get("BITRIX_GROUP_AUTO", "").strip().lower() in ["1", "true", "yes", "on"]
 
 creds_dict = json.loads(GOOGLE_JSON)
 creds = Credentials.from_service_account_info(creds_dict, scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
@@ -373,7 +374,7 @@ def bitrix_webhook():
 
         # --- Обработка вложений (файлов) ---
         if files_data:
-            if event == 'ONIMMESSAGEADD' and not is_bot_mentioned(message_text):
+            if event == 'ONIMMESSAGEADD' and not BITRIX_GROUP_AUTO and not is_bot_mentioned(message_text):
                 bitrix_send_message(
                     dialog_id_for_response,
                     "ℹ️ Чтобы обработать PDF в групповом чате, упомяните бота в тексте сообщения "
