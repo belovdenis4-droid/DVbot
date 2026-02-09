@@ -168,18 +168,24 @@ def bitrix_send_message(dialog_id, text):
 @app.route('/bitrix', methods=['POST'])
 def bitrix_webhook():
     data = request.form
+    json_data = request.get_json(silent=True) or {}
     
     # 1. Проверка токена (безопасность)
-    if data.get('auth[application_token]') != BITRIX_TOKEN:
+    token_from_request = (
+        data.get('auth[application_token]')
+        or json_data.get('auth[application_token]')
+        or (json_data.get('auth') or {}).get('application_token')
+    )
+    if token_from_request != BITRIX_TOKEN:
         logger.warning("Неверный токен авторизации.")
         return "Forbidden", 403
 
     # 2. Обработка событий: ONIMBOTMESSAGEADD (сообщения боту) и ONIMMESSAGEADD (обычные сообщения в чате)
-    event = data.get('event')
+    event = data.get('event') or json_data.get('event')
     if event in ['ONIMBOTMESSAGEADD', 'ONIMMESSAGEADD']:
-        chat_id = data.get('data[PARAMS][CHAT_ID]') # ID чата или пользователя, куда писать ответ
-        user_id_from_bx = data.get('data[PARAMS][FROM_USER_ID]') # ID отправителя из Битрикс
-        message_id = data.get('data[PARAMS][MESSAGE_ID]') # ID сообщения
+        chat_id = data.get('data[PARAMS][CHAT_ID]') or (json_data.get('data') or {}).get('PARAMS', {}).get('CHAT_ID') # ID чата или пользователя, куда писать ответ
+        user_id_from_bx = data.get('data[PARAMS][FROM_USER_ID]') or (json_data.get('data') or {}).get('PARAMS', {}).get('FROM_USER_ID') # ID отправителя из Битрикс
+        message_id = data.get('data[PARAMS][MESSAGE_ID]') or (json_data.get('data') or {}).get('PARAMS', {}).get('MESSAGE_ID') # ID сообщения
 
         # Если это сообщение от самого себя (бота), пропускаем.
         if user_id_from_bx == BITRIX_BOT_ID:
@@ -196,6 +202,7 @@ def bitrix_webhook():
         # Для лички бота это будет ID пользователя, для групп — "chatN".
         dialog_id_for_response = (
             data.get('data[PARAMS][DIALOG_ID]')
+            or (json_data.get('data') or {}).get('PARAMS', {}).get('DIALOG_ID')
             or chat_id
             or user_id_from_bx
         )
@@ -252,7 +259,11 @@ def bitrix_webhook():
                     bitrix_send_message(dialog_id_for_response, f"❌ Произошла ошибка при обработке файла {file_name}.")
         
         # --- Обработка текстовых команд ---
-        message_text = data.get('data[PARAMS][MESSAGE]', '').strip() 
+        message_text = (
+            data.get('data[PARAMS][MESSAGE]')
+            or (json_data.get('data') or {}).get('PARAMS', {}).get('MESSAGE')
+            or ''
+        ).strip()
         if message_text:
             if message_text.lower() == "статус": 
                 try:
@@ -272,7 +283,7 @@ def bitrix_webhook():
             else:
                 try:
                     current_date = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-                    sender_id = data.get('data[PARAMS][FROM_USER_ID]')
+                    sender_id = data.get('data[PARAMS][FROM_USER_ID]') or (json_data.get('data') or {}).get('PARAMS', {}).get('FROM_USER_ID')
                     
                     # Попытка получить имя отправителя (требует прав 'user' для BITRIX_URL)
                     sender_name = f"Пользователь {sender_id}"
