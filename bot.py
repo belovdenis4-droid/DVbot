@@ -28,6 +28,7 @@ LLAMA_KEY = os.environ.get("LLAMA_CLOUD_API_KEY")
 BITRIX_URL = os.environ.get("BITRIX_WEBHOOK_URL") 
 BITRIX_TOKEN = os.environ.get("BITRIX_TOKEN")
 BITRIX_BOT_ID = os.environ.get("BITRIX_BOT_ID") # ID вашего бота из Битрикс
+BITRIX_CLIENT_ID = os.environ.get("BITRIX_CLIENT_ID")
 
 # ID разрешенных чатов Битрикс (для ONIMMESSAGEADD), если используется
 ALLOWED_BX_CHATS = os.environ.get("ALLOWED_BITRIX_CHATS", "").replace(" ", "").split(",")
@@ -176,7 +177,22 @@ def bitrix_webhook():
         or json_data.get('auth[application_token]')
         or (json_data.get('auth') or {}).get('application_token')
     )
-    if token_from_request != BITRIX_TOKEN:
+    auth_client_id = (
+        data.get('auth[client_id]')
+        or json_data.get('auth[client_id]')
+        or (json_data.get('auth') or {}).get('client_id')
+    )
+    auth_app_id = (
+        data.get('auth[application_id]')
+        or json_data.get('auth[application_id]')
+        or (json_data.get('auth') or {}).get('application_id')
+    )
+    client_id_query = request.args.get('CLIENT_ID')
+    request_client_id = auth_client_id or client_id_query
+
+    token_ok = token_from_request == BITRIX_TOKEN
+    client_ok = bool(BITRIX_CLIENT_ID and request_client_id == BITRIX_CLIENT_ID)
+    if not (token_ok or client_ok):
         def _mask_token(value):
             if not value:
                 return "none"
@@ -184,17 +200,6 @@ def bitrix_webhook():
             if len(value) <= 6:
                 return f"{value[0]}...{value[-1]}(len={len(value)})"
             return f"{value[:3]}...{value[-3:]}(len={len(value)})"
-        auth_client_id = (
-            data.get('auth[client_id]')
-            or json_data.get('auth[client_id]')
-            or (json_data.get('auth') or {}).get('client_id')
-        )
-        auth_app_id = (
-            data.get('auth[application_id]')
-            or json_data.get('auth[application_id]')
-            or (json_data.get('auth') or {}).get('application_id')
-        )
-        client_id_query = request.args.get('CLIENT_ID')
         logger.warning(
             "Неверный токен авторизации. req=%s env=%s auth_client_id=%s auth_app_id=%s query_client_id=%s",
             _mask_token(token_from_request),
