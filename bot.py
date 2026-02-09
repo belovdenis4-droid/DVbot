@@ -241,16 +241,43 @@ def bitrix_webhook():
             logger.error("Не удалось определить DIALOG_ID для ответа.")
             return "OK"
 
-        # Получаем ID самого сообщения для дальнейшей обработки (например, для файлов)
-        # Ресурс с информацией о сообщении (включая файлы)
+        # Получаем информацию о сообщении (включая файлы)
+        files_data = {}
         try:
-            msg_res = requests.post(f"{BITRIX_URL.rstrip('/')}/im.message.get.json", json={"MESSAGE_ID": message_id})
+            msg_url = f"{BITRIX_URL.rstrip('/')}/im.message.get.json"
+            msg_res = requests.get(msg_url, params={"ID": message_id})
             msg_res.raise_for_status()
-            msg_data = msg_res.json().get('result', {})
-            files_data = msg_data.get('FILES', {})
+            msg_json = msg_res.json()
+            if "result" in msg_json:
+                msg_data = msg_json.get('result', {})
+                files_data = msg_data.get('FILES', {})
+            else:
+                logger.error(f"Bitrix API error im.message.get: {msg_json}")
         except Exception as e:
             logger.error(f"Не удалось получить информацию о сообщении {message_id}: {e}", exc_info=True)
-            files_data = {}
+            bitrix_send_message(
+                dialog_id_for_response,
+                "⚠️ Не удалось получить информацию о вложении. "
+                "Проверьте права входящего вебхука (IM, Disk) и попробуйте отправить PDF как файл."
+            )
+
+        # Фолбэк: пробуем вытащить файлы прямо из payload события
+        if not files_data:
+            files_from_payload = (
+                data.get('data[PARAMS][FILES]')
+                or (json_data.get('data') or {}).get('PARAMS', {}).get('FILES')
+            )
+            if files_from_payload:
+                if isinstance(files_from_payload, dict):
+                    files_data = files_from_payload
+                elif isinstance(files_from_payload, list):
+                    files_data = {
+                        str(item.get("id") or item.get("ID") or item): item
+                        for item in files_from_payload
+                    }
+                elif isinstance(files_from_payload, str):
+                    file_ids = [s.strip() for s in files_from_payload.split(",") if s.strip()]
+                    files_data = {f_id: {} for f_id in file_ids}
 
         # --- Обработка вложений (файлов) ---
         if files_data:
