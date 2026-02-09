@@ -192,9 +192,13 @@ def bitrix_webhook():
             return "OK"
 
         # Определяем, куда будем писать ответ.
-        # Если это сообщение боту (ONIMBOTMESSAGEADD), то пишем ответ этому боту (наш BITRIX_BOT_ID).
-        # Если это сообщение в разрешенный чат (ONIMMESSAGEADD), то пишем в этот чат (chat_id).
-        dialog_id_for_response = BITRIX_BOT_ID if event == 'ONIMBOTMESSAGEADD' else chat_id
+        # В Bitrix лучше отвечать в DIALOG_ID, который прислал сам обработчик.
+        # Для лички бота это будет ID пользователя, для групп — "chatN".
+        dialog_id_for_response = (
+            data.get('data[PARAMS][DIALOG_ID]')
+            or chat_id
+            or user_id_from_bx
+        )
         
         if not dialog_id_for_response:
             logger.error("Не удалось определить DIALOG_ID для ответа.")
