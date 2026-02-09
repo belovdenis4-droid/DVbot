@@ -136,24 +136,42 @@ def process_and_save(markdown_text):
 # ---------- БИТРИКС24 ----------
 
 def bitrix_send_message(dialog_id, text):
-    """Отправляет сообщение в чат Битрикс24. DIALOG_ID может быть 'chatN', 'userN', 'botN'."""
+    """Отправляет сообщение в чат Битрикс24. DIALOG_ID может быть 'chatN' или ID пользователя."""
     if not BITRIX_URL:
         logger.warning("BITRIX_URL не задан, сообщение в Битрикс не отправлено.")
         return
     try:
-        # Формируем URL для отправки сообщения
+        # Сначала пытаемся отправить от имени бота (если BOT_ID задан)
+        if BITRIX_BOT_ID:
+            bot_url = f"{BITRIX_URL.rstrip('/')}/imbot.message.add.json"
+            bot_payload = {
+                "BOT_ID": BITRIX_BOT_ID,
+                "DIALOG_ID": dialog_id,
+                "MESSAGE": text,
+            }
+            logger.info(f"Отправка сообщения (бот) в Битрикс: URL={bot_url}, Payload={bot_payload}")
+            bot_response = requests.post(bot_url, json=bot_payload)
+            if bot_response.ok:
+                bot_result = bot_response.json()
+                if "result" in bot_result:
+                    logger.info(f"Сообщение успешно отправлено ботом. ID: {bot_result['result']}")
+                    return
+                else:
+                    error_msg = bot_result.get('error_description', bot_result.get('error', 'Неизвестная ошибка API'))
+                    logger.error(f"Ошибка API imbot.message.add: {error_msg}. Ответ: {bot_result}")
+            else:
+                logger.error(f"HTTP ошибка imbot.message.add: {bot_response.status_code} - {bot_response.text}")
+
+        # Фолбэк: обычная отправка от имени пользователя вебхука
         send_url = f"{BITRIX_URL.rstrip('/')}/im.message.add.json"
-        
-        # Формируем payload. DIALOG_ID должен быть корректным (например, 'chat123', 'user456', 'bot789')
         payload = {
-            "DIALOG_ID": dialog_id, 
-            "MESSAGE": text
+            "DIALOG_ID": dialog_id,
+            "MESSAGE": text,
         }
-        
         logger.info(f"Отправка сообщения в Битрикс: URL={send_url}, Payload={payload}")
         response = requests.post(send_url, json=payload)
-        response.raise_for_status() # Проверка на ошибки HTTP
-        
+        response.raise_for_status()
+
         result_data = response.json()
         if "result" in result_data:
             logger.info(f"Сообщение успешно отправлено в Битрикс. ID: {result_data['result']}")
@@ -233,7 +251,7 @@ def bitrix_webhook():
         dialog_id_for_response = (
             data.get('data[PARAMS][DIALOG_ID]')
             or (json_data.get('data') or {}).get('PARAMS', {}).get('DIALOG_ID')
-            or chat_id
+            or (f"chat{chat_id}" if chat_id else None)
             or user_id_from_bx
         )
         
@@ -244,21 +262,25 @@ def bitrix_webhook():
         # Получаем информацию о сообщении (включая файлы)
         files_data = {}
         try:
-            msg_url = f"{BITRIX_URL.rstrip('/')}/im.message.get.json"
+            msg_url = f"{BITRIX_URL.rstrip('/')}/im.message.getById.json"
             msg_res = requests.get(msg_url, params={"ID": message_id})
             msg_res.raise_for_status()
             msg_json = msg_res.json()
             if "result" in msg_json:
-                msg_data = msg_json.get('result', {})
+                result = msg_json.get('result', {})
+                if isinstance(result, dict) and str(message_id) in result:
+                    msg_data = result.get(str(message_id), {})
+                else:
+                    msg_data = result
                 files_data = msg_data.get('FILES', {})
             else:
-                logger.error(f"Bitrix API error im.message.get: {msg_json}")
+                logger.error(f"Bitrix API error im.message.getById: {msg_json}")
         except Exception as e:
             logger.error(f"Не удалось получить информацию о сообщении {message_id}: {e}", exc_info=True)
             bitrix_send_message(
                 dialog_id_for_response,
                 "⚠️ Не удалось получить информацию о вложении. "
-                "Проверьте права входящего вебхука (IM, Disk) и попробуйте отправить PDF как файл."
+                "Проверьте права входящего вебхука (IM, Disk, IMBot) и попробуйте отправить PDF как файл."
             )
 
         # Фолбэк: пробуем вытащить файлы прямо из payload события
