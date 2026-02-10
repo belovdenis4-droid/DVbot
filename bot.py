@@ -75,10 +75,12 @@ app = Flask(__name__)
 def index():
     return "Бот активен и слушает события Битрикс24 (локальное приложение).", 200
 
-@app.route('/bitrix/install', methods=['GET'])
+@app.route('/bitrix/install', methods=['GET', 'POST'])
 def bitrix_install():
-    code = request.args.get("code")
+    code = request.values.get("code")
     if not code:
+        if request.values.get("APP_SID"):
+            return "OK", 200
         return "Missing code parameter.", 400
     if not all([BITRIX_APP_CLIENT_ID, BITRIX_APP_CLIENT_SECRET, BITRIX_APP_REDIRECT_URL]):
         return "Missing BITRIX_APP_CLIENT_ID/SECRET/REDIRECT_URL in environment.", 500
