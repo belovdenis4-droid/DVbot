@@ -171,6 +171,20 @@ def ocr_image_ocr_space(file_path):
         logger.error(f"OCR.Space ошибка: {e}", exc_info=True)
         return "", "OCR ошибка"
 
+def summarize_ocr_promos(text):
+    lines = [line for line in text.splitlines() if line.strip()]
+    line_count = len(lines)
+    promo_count = 0
+    base_count = 0
+    for match in re.finditer(r"\d[\d\s]*₽", text):
+        tail = text[match.end():match.end() + 20]
+        if "до 00:00" in tail:
+            promo_count += 1
+        else:
+            base_count += 1
+    summary = f"Найдено строк: {line_count}\nАкция: {promo_count}\nБазовая: {base_count}"
+    return summary
+
 def process_and_save(markdown_text):
     rows = []
     try: 
@@ -582,7 +596,8 @@ def bitrix_webhook():
                         if err:
                             bitrix_send_message(dialog_id_for_response, f"❌ OCR ошибка: {err}")
                         elif text:
-                            bitrix_send_long_message(dialog_id_for_response, text)
+                            summary = summarize_ocr_promos(text)
+                            bitrix_send_long_message(dialog_id_for_response, f"{summary}\n\n{text}")
                         else:
                             bitrix_send_message(dialog_id_for_response, "⚠️ OCR не нашел текста на изображении.")
                     else:
