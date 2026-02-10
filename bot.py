@@ -75,6 +75,20 @@ app = Flask(__name__)
 def index():
     return "Бот активен и слушает события Битрикс24 (локальное приложение).", 200
 
+def exchange_oauth_code(code):
+    if not all([BITRIX_APP_CLIENT_ID, BITRIX_APP_CLIENT_SECRET, BITRIX_APP_REDIRECT_URL]):
+        return None, "Missing BITRIX_APP_CLIENT_ID/SECRET/REDIRECT_URL in environment."
+    params = {
+        "grant_type": "authorization_code",
+        "client_id": BITRIX_APP_CLIENT_ID,
+        "client_secret": BITRIX_APP_CLIENT_SECRET,
+        "code": code,
+        "redirect_uri": BITRIX_APP_REDIRECT_URL,
+    }
+    token_res = requests.get(BITRIX_OAUTH_URL, params=params)
+    token_res.raise_for_status()
+    return token_res.json(), None
+
 @app.route('/bitrix/install', methods=['GET', 'POST'])
 def bitrix_install():
     code = request.values.get("code")
@@ -82,19 +96,10 @@ def bitrix_install():
         if request.values.get("APP_SID"):
             return "OK", 200
         return "Missing code parameter.", 400
-    if not all([BITRIX_APP_CLIENT_ID, BITRIX_APP_CLIENT_SECRET, BITRIX_APP_REDIRECT_URL]):
-        return "Missing BITRIX_APP_CLIENT_ID/SECRET/REDIRECT_URL in environment.", 500
     try:
-        params = {
-            "grant_type": "authorization_code",
-            "client_id": BITRIX_APP_CLIENT_ID,
-            "client_secret": BITRIX_APP_CLIENT_SECRET,
-            "code": code,
-            "redirect_uri": BITRIX_APP_REDIRECT_URL,
-        }
-        token_res = requests.get(BITRIX_OAUTH_URL, params=params)
-        token_res.raise_for_status()
-        token_json = token_res.json()
+        token_json, err = exchange_oauth_code(code)
+        if err:
+            return err, 500
         access_token = token_json.get("access_token")
         refresh_token = token_json.get("refresh_token")
         if access_token:
@@ -250,6 +255,27 @@ def bitrix_send_message(dialog_id, text):
 def bitrix_webhook():
     if request.method == 'GET':
         logger.info(f"Bitrix GET /bitrix query={dict(request.args)}")
+        if request.args.get("code"):
+            try:
+                token_json, err = exchange_oauth_code(request.args.get("code"))
+                if err:
+                    return err, 500
+                access_token = token_json.get("access_token")
+                refresh_token = token_json.get("refresh_token")
+                if access_token:
+                    return (
+                        "OK\n"
+                        f"access_token={access_token}\n"
+                        f"refresh_token={refresh_token}\n"
+                        f"expires_in={token_json.get('expires_in')}\n"
+                        f"member_id={token_json.get('member_id')}\n"
+                        f"domain={token_json.get('domain')}\n",
+                        200,
+                    )
+                return f"Token error: {token_json}", 400
+            except Exception as e:
+                logger.error(f"OAuth token error: {e}", exc_info=True)
+                return f"OAuth error: {e}", 500
         return "OK", 200
     data = request.form
     json_data = request.get_json(silent=True) or {}
