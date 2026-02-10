@@ -172,8 +172,6 @@ def ocr_image_ocr_space(file_path):
         return "", "OCR ошибка"
 
 def summarize_ocr_promos(text):
-    lines = [line for line in text.splitlines() if line.strip()]
-    line_count = len(lines)
     promo_count = 0
     base_count = 0
     for match in re.finditer(r"\d[\d\s]*₽", text):
@@ -182,7 +180,12 @@ def summarize_ocr_promos(text):
             promo_count += 1
         else:
             base_count += 1
-    summary = f"Найдено строк: {line_count}\nАкция: {promo_count}\nБазовая: {base_count}"
+    total = promo_count + base_count
+    summary = (
+        f"[b]Найдено строк: {total}[/b]\n"
+        f"[b]Акция: {promo_count}[/b]\n"
+        f"[b]Базовая: {base_count}[/b]"
+    )
     return summary
 
 def process_and_save(markdown_text):
@@ -509,8 +512,9 @@ def bitrix_webhook():
         for value in candidate_values:
             file_ids.extend(_extract_file_ids(value))
         for raw_key in form_param_keys:
-            if any(tag in raw_key.upper() for tag in ["FILE", "ATTACH"]):
-                file_ids.extend(re.findall(r"\d+", raw_key))
+            match = re.search(r"(FILES|ATTACH)\]\[(\d+)\]", raw_key)
+            if match:
+                file_ids.append(match.group(2))
         file_ids = [fid for fid in file_ids if fid and fid.lower() != "none"]
         if file_ids:
             files_data = {fid: {} for fid in dict.fromkeys(file_ids)}
@@ -569,7 +573,9 @@ def bitrix_webhook():
                     # Получаем URL для скачивания файла
                     disk_file_info_url = f"{BITRIX_URL.rstrip('/')}/disk.file.get.json"
                     disk_file_response = requests.post(disk_file_info_url, json={"id": f_id})
-                    disk_file_response.raise_for_status()
+                    if not disk_file_response.ok:
+                        logger.info(f"Пропускаю файл ID={f_id}: {disk_file_response.status_code}")
+                        continue
                     
                     disk_file_data = disk_file_response.json().get('result', {})
                     download_url = disk_file_data.get('DOWNLOAD_URL')
@@ -591,7 +597,7 @@ def bitrix_webhook():
                         md = get_text_llama_parse(path)
                         count = process_and_save(md)
                         bitrix_send_message(dialog_id_for_response, f"✅ Битрикс: добавлено строк: {count} на основной лист.")
-                    elif "look" in message_text.lower() and file_ext in ["jpg", "jpeg", "png", "webp", "bmp", "gif"]:
+                    elif file_ext in ["jpg", "jpeg", "png", "webp", "bmp", "gif"]:
                         text, err = ocr_image_ocr_space(path)
                         if err:
                             bitrix_send_message(dialog_id_for_response, f"❌ OCR ошибка: {err}")
