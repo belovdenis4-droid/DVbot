@@ -172,6 +172,10 @@ def ocr_image_ocr_space(file_path):
         return "", "OCR ошибка"
 
 def summarize_ocr_promos(text):
+    ads_count = None
+    ads_match = re.search(r"(\d+)\s+объявлений", text, flags=re.IGNORECASE)
+    if ads_match:
+        ads_count = ads_match.group(1)
     promo_count = 0
     base_count = 0
     for match in re.finditer(r"\d[\d\s]*₽", text):
@@ -181,11 +185,13 @@ def summarize_ocr_promos(text):
         else:
             base_count += 1
     total = promo_count + base_count
-    summary = (
-        f"[b]Найдено строк: {total}[/b]\n"
-        f"[b]Акция: {promo_count}[/b]\n"
-        f"[b]Базовая: {base_count}[/b]"
-    )
+    summary_lines = []
+    if ads_count is not None:
+        summary_lines.append(f"[b]Объявлений: {ads_count}[/b]")
+    summary_lines.append(f"[b]Найдено строк: {total}[/b]")
+    summary_lines.append(f"[b]Акция: {promo_count}[/b]")
+    summary_lines.append(f"[b]Базовая: {base_count}[/b]")
+    summary = "\n".join(summary_lines)
     return summary
 
 def process_and_save(markdown_text):
