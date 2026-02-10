@@ -220,18 +220,36 @@ def fetch_sud_cases():
     response.raise_for_status()
     return response.text, None
 
+def _html_to_text(html_text):
+    text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", html_text)
+    text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
+    text = re.sub(r"(?i)<br\\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</(tr|p|div|li)>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\\s*\n+", "\n", text)
+    return text.strip()
+
+def _extract_category_segment(text):
+    keyword_match = re.search(r"(КАТЕГОРИЯ\\s*:.*)", text, flags=re.IGNORECASE)
+    if keyword_match:
+        segment = keyword_match.group(1)
+    else:
+        segment = text
+    segment = re.sub(r"\\s*;\\s*", "; ", segment)
+    segment = re.sub(r"\\s*:\\s*", ": ", segment)
+    return segment.strip()
+
 def parse_sud_cases(html_text):
     rows = []
+    # Table-based parse (if structure is present)
     for row_html in re.findall(r"<tr[^>]*>(.*?)</tr>", html_text, flags=re.DOTALL | re.IGNORECASE):
         cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row_html, flags=re.DOTALL | re.IGNORECASE)
         cleaned = [c for c in (_strip_html(cell) for cell in cells) if c]
         if not cleaned:
             continue
         row_text = " ".join(cleaned)
-        if re.search(r"\bкатегор(ия|ии)\b", row_text, flags=re.IGNORECASE) and re.search(
-            r"\bсторон(ы|а)\b", row_text, flags=re.IGNORECASE
-        ):
-            continue
         date_match = re.search(r"\b\d{2}\.\d{2}\.\d{4}\b", row_text)
         if not date_match:
             continue
@@ -246,7 +264,22 @@ def parse_sud_cases(html_text):
         if not category_cell:
             category_cell = cleaned[-1] if len(cleaned) >= 2 else None
         if category_cell and category_cell != date:
-            rows.append(f"{date}, {category_cell}")
+            rows.append(f"{date}, {_extract_category_segment(category_cell)}")
+
+    if rows:
+        return rows
+
+    # Text-based fallback for pages without a clean table
+    plain = _html_to_text(html_text)
+    date_iter = list(re.finditer(r"\b\d{2}\.\d{2}\.\d{4}\b", plain))
+    for idx, match in enumerate(date_iter):
+        start = match.start()
+        end = date_iter[idx + 1].start() if idx + 1 < len(date_iter) else start + 800
+        segment = plain[start:end]
+        if re.search(r"категор|истец|ответчик|заявител", segment, flags=re.IGNORECASE):
+            date = match.group(0)
+            category_segment = _extract_category_segment(segment)
+            rows.append(f"{date}, {category_segment}")
     return rows
 
 def process_and_save(markdown_text):
@@ -735,7 +768,13 @@ def bitrix_webhook():
                     if rows:
                         response = "\n".join(f"{i + 1}. {row}" for i, row in enumerate(rows))
                     else:
-                        response = "Ничего не найдено по указанному запросу."
+                        if re.search(r"captcha", html_text, flags=re.IGNORECASE):
+                            response = (
+                                "Сайт суда вернул страницу с капчей. "
+                                "Без ручного прохождения капчи результаты недоступны."
+                            )
+                        else:
+                            response = "Ничего не найдено по указанному запросу."
                     bitrix_send_long_message(dialog_id_for_response, response)
                 except Exception as e:
                     bitrix_send_message(dialog_id_for_response, f"❌ Ошибка при запросе суда: {e}")
@@ -906,7 +945,13 @@ async def sud_command(update: Update, context):
         if rows:
             response = "\n".join(f"{i + 1}. {row}" for i, row in enumerate(rows))
         else:
-            response = "Ничего не найдено по указанному запросу."
+            if re.search(r"captcha", html_text, flags=re.IGNORECASE):
+                response = (
+                    "Сайт суда вернул страницу с капчей. "
+                    "Без ручного прохождения капчи результаты недоступны."
+                )
+            else:
+                response = "Ничего не найдено по указанному запросу."
         await update.message.reply_text(response)
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка при запросе суда: {e}")
