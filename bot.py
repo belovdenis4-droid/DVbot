@@ -201,7 +201,7 @@ def _strip_html(value):
     return re.sub(r"\s+", " ", text).strip()
 
 def fetch_sud_cases():
-    url = "https://yaroslavsky--jrs.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=r&delo_id=1540005&case_type=0&new=0&G1_PARTS__NAMESS=%C1%E5%EB%EE%E2&g1_case__CASE_NUMBERSS=&g1_case__JUDICIAL_UIDSS=&captcha=93493&captchaid=74fkvjsd5j7lt68aac8dl4hco4&delo_table=g1_case&g1_case__ENTRY_DATE1D=01.12.2025&g1_case__ENTRY_DATE2D=&G1_CASE__JUDGE=&g1_case__RESULT_DATE1D=&g1_case__RESULT_DATE2D=&G1_CASE__RESULT=&G1_CASE__BUILDING_ID=&G1_CASE__COURT_STRUCT=&G1_EVENT__EVENT_NAME=&G1_EVENT__EVENT_DATEDD=&G1_PARTS__PARTS_TYPE=&G1_PARTS__INN_STRSS=&G1_PARTS__KPP_STRSS=&G1_PARTS__OGRN_STRSS=&G1_PARTS__OGRNIP_STRSS=&G1_RKN_ACCESS_RESTRICTION__RKN_REASON=&g1_rkn_access_restriction__RKN_RESTRICT_URLSS=&g1_requirement__ACCESSION_DATE1D=&g1_requirement__ACCESSION_DATE2D=&G1_REQUIREMENT__CATEGORY=&G1_REQUIREMENT__ESSENCESS=&G1_REQUIREMENT__JOIN_END_DATE1D=&G1_REQUIREMENT__JOIN_END_DATE2D=&G1_REQUIREMENT__PUBLICATION_ID=&G1_DOCUMENT__PUBL_DATE1D=&G1_DOCUMENT__PUBL_DATE2D=&G1_CASE__VALIDITY_DATE1D=&G1_CASE__VALIDITY_DATE2D=&G1_ORDER_INFO__ORDER_DATE1D=&G1_ORDER_INFO__ORDER_DATE2D=&G1_ORDER_INFO__ORDER_NUMSS=&G1_ORDER_INFO__EXTERNALKEYSS=&G1_ORDER_INFO__STATE_ID=&G1_ORDER_INFO__RECIP_ID=&Submit=%CD%E0%E9%F2%E8"
+    url = "https://yaroslavsky--jrs.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=r&delo_id=1540005&case_type=0&new=0&G1_PARTS__NAMESS=%C1%E5%EB%EE%E2&g1_case__CASE_NUMBERSS=&g1_case__JUDICIAL_UIDSS=&captcha=93493&captchaid=74fkvjsd5j7lt68aac8dl4hco4&delo_table=g1_case&g1_case__ENTRY_DATE1D=01.01.2025&g1_case__ENTRY_DATE2D=&G1_CASE__JUDGE=&g1_case__RESULT_DATE1D=&g1_case__RESULT_DATE2D=&G1_CASE__RESULT=&G1_CASE__BUILDING_ID=&G1_CASE__COURT_STRUCT=&G1_EVENT__EVENT_NAME=&G1_EVENT__EVENT_DATEDD=&G1_PARTS__PARTS_TYPE=&G1_PARTS__INN_STRSS=&G1_PARTS__KPP_STRSS=&G1_PARTS__OGRN_STRSS=&G1_PARTS__OGRNIP_STRSS=&G1_RKN_ACCESS_RESTRICTION__RKN_REASON=&g1_rkn_access_restriction__RKN_RESTRICT_URLSS=&g1_requirement__ACCESSION_DATE1D=&g1_requirement__ACCESSION_DATE2D=&G1_REQUIREMENT__CATEGORY=&G1_REQUIREMENT__ESSENCESS=&G1_REQUIREMENT__JOIN_END_DATE1D=&G1_REQUIREMENT__JOIN_END_DATE2D=&G1_REQUIREMENT__PUBLICATION_ID=&G1_DOCUMENT__PUBL_DATE1D=&G1_DOCUMENT__PUBL_DATE2D=&G1_CASE__VALIDITY_DATE1D=&G1_CASE__VALIDITY_DATE2D=&G1_ORDER_INFO__ORDER_DATE1D=&G1_ORDER_INFO__ORDER_DATE2D=&G1_ORDER_INFO__ORDER_NUMSS=&G1_ORDER_INFO__EXTERNALKEYSS=&G1_ORDER_INFO__STATE_ID=&G1_ORDER_INFO__RECIP_ID=&Submit=%CD%E0%E9%F2%E8"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -564,8 +564,22 @@ def bitrix_webhook():
             if form_params:
                 logger.info("Bitrix form params keys: %s", list(form_params.keys()))
 
+        has_file_hints = bool(file_ids)
+        if not has_file_hints:
+            for key in params_data.keys():
+                if any(tag in key.upper() for tag in ["FILE", "ATTACH"]):
+                    has_file_hints = True
+                    break
+        if not has_file_hints:
+            for key in form_param_keys:
+                if "FILE" in key.upper() or "ATTACH" in key.upper():
+                    has_file_hints = True
+                    break
+        command_text = message_text.lower()
+        is_text_command = command_text in ["статус", "chat_id", "chatid", "помощь", "help", "sud"]
+
         # Если из payload не удалось — пробуем получить сообщение через API
-        if not files_data:
+        if not files_data and (has_file_hints or not is_text_command):
             try:
                 msg_url = f"{BITRIX_URL.rstrip('/')}/im.message.getById.json"
                 msg_res = requests.get(msg_url, params={"ID": message_id})
@@ -587,11 +601,12 @@ def bitrix_webhook():
                     logger.error(f"Bitrix API error im.message.getById: {msg_json}")
             except Exception as e:
                 logger.error(f"Не удалось получить информацию о сообщении {message_id}: {e}", exc_info=True)
-                bitrix_send_message(
-                    dialog_id_for_response,
-                    "⚠️ Не удалось получить информацию о вложении. "
-                    "Проверьте права входящего вебхука (IM, Disk, IMBot) и попробуйте отправить PDF как файл."
-                )
+                if has_file_hints:
+                    bitrix_send_message(
+                        dialog_id_for_response,
+                        "⚠️ Не удалось получить информацию о вложении. "
+                        "Проверьте права входящего вебхука (IM, Disk, IMBot) и попробуйте отправить PDF как файл."
+                    )
 
         # --- Обработка вложений (файлов) ---
         if files_data:
