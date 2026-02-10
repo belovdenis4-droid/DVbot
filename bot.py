@@ -25,6 +25,7 @@ BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GOOGLE_JSON = os.environ.get("GOOGLE_JSON")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 LLAMA_KEY = os.environ.get("LLAMA_CLOUD_API_KEY")
+OCR_SPACE_KEY = os.environ.get("OCR_SPACE_KEY")
 BITRIX_URL = os.environ.get("BITRIX_WEBHOOK_URL") 
 BITRIX_TOKEN = os.environ.get("BITRIX_TOKEN")
 BITRIX_BOT_ID = os.environ.get("BITRIX_BOT_ID") # ID вашего бота из Битрикс
@@ -145,6 +146,31 @@ def get_text_llama_parse(file_path):
         logger.error(f"Ошибка LlamaIndex парсинга: {e}", exc_info=True)
         return ""
 
+def ocr_image_ocr_space(file_path):
+    if not OCR_SPACE_KEY:
+        return "", "OCR_SPACE_KEY не задан"
+    try:
+        url = "https://api.ocr.space/parse/image"
+        with open(file_path, "rb") as f:
+            files = {"file": (os.path.basename(file_path), f)}
+            data = {
+                "apikey": OCR_SPACE_KEY,
+                "language": "rus",
+                "OCREngine": 2,
+                "isOverlayRequired": False,
+            }
+            response = requests.post(url, files=files, data=data, timeout=60)
+            response.raise_for_status()
+        result = response.json()
+        if result.get("IsErroredOnProcessing"):
+            return "", "OCR ошибка"
+        parsed = result.get("ParsedResults", [])
+        text = "\n".join(item.get("ParsedText", "") for item in parsed).strip()
+        return text, None
+    except Exception as e:
+        logger.error(f"OCR.Space ошибка: {e}", exc_info=True)
+        return "", "OCR ошибка"
+
 def process_and_save(markdown_text):
     rows = []
     try: 
@@ -256,6 +282,12 @@ def bitrix_send_message(dialog_id, text):
         logger.error(f"HTTP Ошибка при отправке в Битрикс: {http_err.response.status_code} - {http_err.response.text}", exc_info=True)
     except Exception as e:
         logger.error(f"Общая ошибка при отправке сообщения в Битрикс: {e}", exc_info=True)
+
+def bitrix_send_long_message(dialog_id, text, chunk_size=3000):
+    if not text:
+        return
+    for i in range(0, len(text), chunk_size):
+        bitrix_send_message(dialog_id, text[i:i + chunk_size])
 
 @app.route('/bitrix', methods=['GET', 'POST'])
 def bitrix_webhook():
@@ -529,21 +561,35 @@ def bitrix_webhook():
                     download_url = disk_file_data.get('DOWNLOAD_URL')
                     file_name = disk_file_data.get('NAME', f'bx_{f_id}.pdf')
                     
-                    if download_url and file_name.lower().endswith('.pdf'):
-                        path = f"downloads/{file_name}"
-                        Path("downloads").mkdir(exist_ok=True)
-                        
-                        f_res = requests.get(download_url)
-                        f_res.raise_for_status()
-                        with open(path, "wb") as f: f.write(f_res.content)
-                        
+                    if not download_url:
+                        logger.info(f"Пропускаю файл без ссылки: {file_name}.")
+                        continue
+
+                    file_ext = file_name.lower().rsplit(".", 1)[-1] if "." in file_name else ""
+                    path = f"downloads/{file_name}"
+                    Path("downloads").mkdir(exist_ok=True)
+
+                    f_res = requests.get(download_url)
+                    f_res.raise_for_status()
+                    with open(path, "wb") as f: f.write(f_res.content)
+
+                    if file_ext == "pdf":
                         md = get_text_llama_parse(path)
                         count = process_and_save(md)
-                        
                         bitrix_send_message(dialog_id_for_response, f"✅ Битрикс: добавлено строк: {count} на основной лист.")
-                        if os.path.exists(path): os.remove(path)
+                    elif "look" in message_text.lower() and file_ext in ["jpg", "jpeg", "png", "webp", "bmp", "gif"]:
+                        text, err = ocr_image_ocr_space(path)
+                        if err:
+                            bitrix_send_message(dialog_id_for_response, f"❌ OCR ошибка: {err}")
+                        elif text:
+                            bitrix_send_long_message(dialog_id_for_response, text)
+                        else:
+                            bitrix_send_message(dialog_id_for_response, "⚠️ OCR не нашел текста на изображении.")
                     else:
-                        logger.info(f"Пропускаю файл не PDF или без ссылки: {file_name}.")
+                        logger.info(f"Пропускаю файл не PDF/не look: {file_name}.")
+
+                    if os.path.exists(path):
+                        os.remove(path)
                         
                 except Exception as e:
                     logger.error(f"Ошибка обработки файла {file_name} (ID: {f_id}): {e}", exc_info=True)
@@ -572,9 +618,10 @@ def bitrix_webhook():
             elif message_text.lower() in ["помощь", "help"]: 
                 bitrix_send_message(
                     dialog_id_for_response,
-                    "Доступные команды: 'статус', 'помощь' (или 'help'). "
+                    "Доступные команды: 'статус', 'помощь' (или 'help'), 'look'. "
                     "Я автоматически распознаю PDF-файлы, отправленные мне в чат, "
-                    "и добавляю результаты в Google Таблицу: лист 'Лист1'."
+                    "и добавляю результаты в Google Таблицу: лист 'Лист1'. "
+                    "Команда 'look' + изображение: верну весь распознанный текст."
                 )
             
             # НОВОЕ: БЛОК: Запись любого другого текста в таблицу "Тест"
