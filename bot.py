@@ -211,7 +211,7 @@ def fetch_sud_cases():
         "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://yaroslavsky--jrs.sudrf.ru/",
+        "Referer": "https://reputation.su/",
     }
     response = requests.get(url, headers=headers, timeout=30)
     if response.status_code in [401, 403]:
@@ -238,38 +238,41 @@ def _html_to_text(html_text):
 def parse_sud_cases(html_text):
     rows = []
     plain = _html_to_text(html_text)
-    case_starts = [m.start() for m in re.finditer(r"^###\s+", plain, flags=re.MULTILINE)]
-    for idx, start in enumerate(case_starts):
-        end = case_starts[idx + 1] if idx + 1 < len(case_starts) else len(plain)
-        block = plain[start:end].strip()
-        if not block:
-            continue
-        lines = [line.strip() for line in block.splitlines() if line.strip()]
-        def _collect_section(section_name):
-            items = []
-            for i, line in enumerate(lines):
-                if line.lower() == section_name.lower():
-                    for next_line in lines[i + 1:]:
-                        if next_line.lower() in [
-                            "категория",
-                            "истцы",
-                            "ответчики",
-                            "другие участники",
-                            "судья",
-                            "движение по делу",
-                            "регистрация",
-                            "посмотреть дело",
-                        ]:
-                            break
-                        items.append(next_line)
-                    break
-            return items
-        plaintiffs = _collect_section("Истцы")
-        defendants = _collect_section("Ответчики")
+    lines = [line.strip() for line in plain.splitlines() if line.strip()]
+    case_number_re = re.compile(r"\b\d{1,3}-\d{1,6}/\d{4}\b")
+    case_indices = [i for i, line in enumerate(lines) if case_number_re.search(line)]
+    if not case_indices:
+        case_indices = [i for i, line in enumerate(lines) if line.lower() == "посмотреть дело"]
+
+    def _collect_section(block_lines, section_name):
+        items = []
+        for i, line in enumerate(block_lines):
+            if line.lower() == section_name.lower():
+                for next_line in block_lines[i + 1:]:
+                    if next_line.lower() in [
+                        "категория",
+                        "истцы",
+                        "ответчики",
+                        "другие участники",
+                        "судья",
+                        "движение по делу",
+                        "регистрация",
+                        "посмотреть дело",
+                    ]:
+                        break
+                    items.append(next_line)
+                break
+        return items
+
+    for idx, start in enumerate(case_indices):
+        end = case_indices[idx + 1] if idx + 1 < len(case_indices) else len(lines)
+        block_lines = lines[start:end]
+        plaintiffs = _collect_section(block_lines, "Истцы")
+        defendants = _collect_section(block_lines, "Ответчики")
         reg_date = None
-        for i, line in enumerate(lines):
-            if line.lower() == "регистрация" and i + 1 < len(lines):
-                reg_date = lines[i + 1]
+        for i, line in enumerate(block_lines):
+            if line.lower() == "регистрация" and i + 1 < len(block_lines):
+                reg_date = block_lines[i + 1]
                 break
         if plaintiffs or defendants or reg_date:
             rows.append(
