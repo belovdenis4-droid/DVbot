@@ -212,6 +212,26 @@ def bitrix_webhook():
         return "OK", 200
     data = request.form
     json_data = request.get_json(silent=True) or {}
+    def _mask_token(value):
+        if not value:
+            return "none"
+        value = str(value)
+        if len(value) <= 6:
+            return f"{value[0]}...{value[-1]}(len={len(value)})"
+        return f"{value[:3]}...{value[-3:]}(len={len(value)})"
+
+    if data.get('APP_SID') or request.args.get('APP_SID') or data.get('auth[client_id]') or (json_data.get('auth') or {}).get('client_id'):
+        access_token = (
+            data.get('auth[access_token]')
+            or json_data.get('auth[access_token]')
+            or (json_data.get('auth') or {}).get('access_token')
+        )
+        logger.info(
+            "Bitrix app ping meta: app_sid=%s auth_client_id=%s access_token=%s",
+            _mask_token(data.get('APP_SID') or request.args.get('APP_SID')),
+            _mask_token(data.get('auth[client_id]') or (json_data.get('auth') or {}).get('client_id')),
+            _mask_token(access_token),
+        )
     # Локальное приложение: Bitrix может вызывать обработчик без event
     if not (data.get('event') or json_data.get('event')):
         if data.get('APP_SID') or request.args.get('APP_SID'):
