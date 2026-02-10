@@ -212,21 +212,41 @@ def fetch_sud_cases():
     response = requests.get(url, headers=headers, timeout=30)
     if response.status_code == 403:
         return None, "403 Forbidden"
+    content_type = response.headers.get("content-type", "").lower()
+    if "charset=windows-1251" in content_type or "charset=cp1251" in content_type:
+        response.encoding = "cp1251"
+    elif not response.encoding or response.encoding.lower() in ["iso-8859-1", "latin-1", "latin1"]:
+        response.encoding = response.apparent_encoding or "cp1251"
     response.raise_for_status()
     return response.text, None
 
 def parse_sud_cases(html_text):
     rows = []
     for row_html in re.findall(r"<tr[^>]*>(.*?)</tr>", html_text, flags=re.DOTALL | re.IGNORECASE):
-        if "case_id=" not in row_html:
-            continue
         cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row_html, flags=re.DOTALL | re.IGNORECASE)
-        cleaned = [_strip_html(cell) for cell in cells]
-        if len(cleaned) >= 3:
-            date = cleaned[1]
-            category = cleaned[2]
-            if date and category:
-                rows.append(f"{date}, {category}")
+        cleaned = [c for c in (_strip_html(cell) for cell in cells) if c]
+        if not cleaned:
+            continue
+        row_text = " ".join(cleaned)
+        if re.search(r"\bкатегор(ия|ии)\b", row_text, flags=re.IGNORECASE) and re.search(
+            r"\bсторон(ы|а)\b", row_text, flags=re.IGNORECASE
+        ):
+            continue
+        date_match = re.search(r"\b\d{2}\.\d{2}\.\d{4}\b", row_text)
+        if not date_match:
+            continue
+        date = date_match.group(0)
+        category_cell = None
+        for cell in cleaned:
+            if re.search(r"\bкатегор", cell, flags=re.IGNORECASE) or re.search(
+                r"\bистец|\bответчик|\bзаявител", cell, flags=re.IGNORECASE
+            ):
+                category_cell = cell
+                break
+        if not category_cell:
+            category_cell = cleaned[-1] if len(cleaned) >= 2 else None
+        if category_cell and category_cell != date:
+            rows.append(f"{date}, {category_cell}")
     return rows
 
 def process_and_save(markdown_text):
