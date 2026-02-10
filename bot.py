@@ -202,9 +202,18 @@ def _strip_html(value):
 
 def fetch_sud_cases():
     url = "https://yaroslavsky--jrs.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=r&delo_id=1540005&case_type=0&new=0&G1_PARTS__NAMESS=%C1%E5%EB%EE%E2&g1_case__CASE_NUMBERSS=&g1_case__JUDICIAL_UIDSS=&captcha=93493&captchaid=74fkvjsd5j7lt68aac8dl4hco4&delo_table=g1_case&g1_case__ENTRY_DATE1D=01.12.2025&g1_case__ENTRY_DATE2D=&G1_CASE__JUDGE=&g1_case__RESULT_DATE1D=&g1_case__RESULT_DATE2D=&G1_CASE__RESULT=&G1_CASE__BUILDING_ID=&G1_CASE__COURT_STRUCT=&G1_EVENT__EVENT_NAME=&G1_EVENT__EVENT_DATEDD=&G1_PARTS__PARTS_TYPE=&G1_PARTS__INN_STRSS=&G1_PARTS__KPP_STRSS=&G1_PARTS__OGRN_STRSS=&G1_PARTS__OGRNIP_STRSS=&G1_RKN_ACCESS_RESTRICTION__RKN_REASON=&g1_rkn_access_restriction__RKN_RESTRICT_URLSS=&g1_requirement__ACCESSION_DATE1D=&g1_requirement__ACCESSION_DATE2D=&G1_REQUIREMENT__CATEGORY=&G1_REQUIREMENT__ESSENCESS=&G1_REQUIREMENT__JOIN_END_DATE1D=&G1_REQUIREMENT__JOIN_END_DATE2D=&G1_REQUIREMENT__PUBLICATION_ID=&G1_DOCUMENT__PUBL_DATE1D=&G1_DOCUMENT__PUBL_DATE2D=&G1_CASE__VALIDITY_DATE1D=&G1_CASE__VALIDITY_DATE2D=&G1_ORDER_INFO__ORDER_DATE1D=&G1_ORDER_INFO__ORDER_DATE2D=&G1_ORDER_INFO__ORDER_NUMSS=&G1_ORDER_INFO__EXTERNALKEYSS=&G1_ORDER_INFO__STATE_ID=&G1_ORDER_INFO__RECIP_ID=&Submit=%CD%E0%E9%F2%E8"
-    response = requests.get(url, timeout=30)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://yaroslavsky--jrs.sudrf.ru/",
+    }
+    response = requests.get(url, headers=headers, timeout=30)
+    if response.status_code == 403:
+        return None, "403 Forbidden"
     response.raise_for_status()
-    return response.text
+    return response.text, None
 
 def parse_sud_cases(html_text):
     rows = []
@@ -679,7 +688,14 @@ def bitrix_webhook():
             
             elif message_text.lower() == "sud":
                 try:
-                    html_text = fetch_sud_cases()
+                    html_text, fetch_err = fetch_sud_cases()
+                    if fetch_err:
+                        bitrix_send_message(
+                            dialog_id_for_response,
+                            "Сайт суда блокирует автоматический запрос (403). "
+                            "Нужна ручная капча в браузере, иначе данные недоступны."
+                        )
+                        return
                     rows = parse_sud_cases(html_text)
                     if rows:
                         response = "\n".join(f"{i + 1}. {row}" for i, row in enumerate(rows))
@@ -844,7 +860,13 @@ async def handle_tg_doc(update: Update, context):
 
 async def sud_command(update: Update, context):
     try:
-        html_text = fetch_sud_cases()
+        html_text, fetch_err = fetch_sud_cases()
+        if fetch_err:
+            await update.message.reply_text(
+                "Сайт суда блокирует автоматический запрос (403). "
+                "Нужна ручная капча в браузере, иначе данные недоступны."
+            )
+            return
         rows = parse_sud_cases(html_text)
         if rows:
             response = "\n".join(f"{i + 1}. {row}" for i, row in enumerate(rows))
