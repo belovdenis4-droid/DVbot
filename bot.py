@@ -201,7 +201,11 @@ def _strip_html(value):
     return re.sub(r"\s+", " ", text).strip()
 
 def fetch_sud_cases():
-    url = "https://yaroslavsky--jrs.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=r&delo_id=1540005&case_type=0&new=0&G1_PARTS__NAMESS=%C1%E5%EB%EE%E2&g1_case__CASE_NUMBERSS=&g1_case__JUDICIAL_UIDSS=&captcha=93493&captchaid=74fkvjsd5j7lt68aac8dl4hco4&delo_table=g1_case&g1_case__ENTRY_DATE1D=01.01.2025&g1_case__ENTRY_DATE2D=&G1_CASE__JUDGE=&g1_case__RESULT_DATE1D=&g1_case__RESULT_DATE2D=&G1_CASE__RESULT=&G1_CASE__BUILDING_ID=&G1_CASE__COURT_STRUCT=&G1_EVENT__EVENT_NAME=&G1_EVENT__EVENT_DATEDD=&G1_PARTS__PARTS_TYPE=&G1_PARTS__INN_STRSS=&G1_PARTS__KPP_STRSS=&G1_PARTS__OGRN_STRSS=&G1_PARTS__OGRNIP_STRSS=&G1_RKN_ACCESS_RESTRICTION__RKN_REASON=&g1_rkn_access_restriction__RKN_RESTRICT_URLSS=&g1_requirement__ACCESSION_DATE1D=&g1_requirement__ACCESSION_DATE2D=&G1_REQUIREMENT__CATEGORY=&G1_REQUIREMENT__ESSENCESS=&G1_REQUIREMENT__JOIN_END_DATE1D=&G1_REQUIREMENT__JOIN_END_DATE2D=&G1_REQUIREMENT__PUBLICATION_ID=&G1_DOCUMENT__PUBL_DATE1D=&G1_DOCUMENT__PUBL_DATE2D=&G1_CASE__VALIDITY_DATE1D=&G1_CASE__VALIDITY_DATE2D=&G1_ORDER_INFO__ORDER_DATE1D=&G1_ORDER_INFO__ORDER_DATE2D=&G1_ORDER_INFO__ORDER_NUMSS=&G1_ORDER_INFO__EXTERNALKEYSS=&G1_ORDER_INFO__STATE_ID=&G1_ORDER_INFO__RECIP_ID=&Submit=%CD%E0%E9%F2%E8"
+    url = (
+        "https://reputation.su/search?"
+        "query=%D0%B1%D0%B5%D0%BB%D0%BE%D0%B2+%D0%B4%D0%B5%D0%BD%D0%B8%D1%81+%D0%B2%D0%B8%D0%BA%D1%82%D0%BE%D1%80%D0%BE%D0%B2%D0%B8%D1%87"
+        "&region=18&region=76&region=35"
+    )
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -210,13 +214,13 @@ def fetch_sud_cases():
         "Referer": "https://yaroslavsky--jrs.sudrf.ru/",
     }
     response = requests.get(url, headers=headers, timeout=30)
-    if response.status_code == 403:
-        return None, "403 Forbidden"
+    if response.status_code in [401, 403]:
+        return None, f"{response.status_code} Forbidden"
     content_type = response.headers.get("content-type", "").lower()
     if "charset=windows-1251" in content_type or "charset=cp1251" in content_type:
         response.encoding = "cp1251"
     elif not response.encoding or response.encoding.lower() in ["iso-8859-1", "latin-1", "latin1"]:
-        response.encoding = response.apparent_encoding or "cp1251"
+        response.encoding = response.apparent_encoding or "utf-8"
     response.raise_for_status()
     return response.text, None
 
@@ -231,55 +235,50 @@ def _html_to_text(html_text):
     text = re.sub(r"\n\\s*\n+", "\n", text)
     return text.strip()
 
-def _extract_category_segment(text):
-    keyword_match = re.search(r"(КАТЕГОРИЯ\\s*:.*)", text, flags=re.IGNORECASE)
-    if keyword_match:
-        segment = keyword_match.group(1)
-    else:
-        segment = text
-    segment = re.sub(r"\\s*;\\s*", "; ", segment)
-    segment = re.sub(r"\\s*:\\s*", ": ", segment)
-    return segment.strip()
-
 def parse_sud_cases(html_text):
     rows = []
-    # Table-based parse (if structure is present)
-    for row_html in re.findall(r"<tr[^>]*>(.*?)</tr>", html_text, flags=re.DOTALL | re.IGNORECASE):
-        cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row_html, flags=re.DOTALL | re.IGNORECASE)
-        cleaned = [c for c in (_strip_html(cell) for cell in cells) if c]
-        if not cleaned:
-            continue
-        row_text = " ".join(cleaned)
-        date_match = re.search(r"\b\d{2}\.\d{2}\.\d{4}\b", row_text)
-        if not date_match:
-            continue
-        date = date_match.group(0)
-        category_cell = None
-        for cell in cleaned:
-            if re.search(r"\bкатегор", cell, flags=re.IGNORECASE) or re.search(
-                r"\bистец|\bответчик|\bзаявител", cell, flags=re.IGNORECASE
-            ):
-                category_cell = cell
-                break
-        if not category_cell:
-            category_cell = cleaned[-1] if len(cleaned) >= 2 else None
-        if category_cell and category_cell != date:
-            rows.append(f"{date}, {_extract_category_segment(category_cell)}")
-
-    if rows:
-        return rows
-
-    # Text-based fallback for pages without a clean table
     plain = _html_to_text(html_text)
-    date_iter = list(re.finditer(r"\b\d{2}\.\d{2}\.\d{4}\b", plain))
-    for idx, match in enumerate(date_iter):
-        start = match.start()
-        end = date_iter[idx + 1].start() if idx + 1 < len(date_iter) else start + 800
-        segment = plain[start:end]
-        if re.search(r"категор|истец|ответчик|заявител", segment, flags=re.IGNORECASE):
-            date = match.group(0)
-            category_segment = _extract_category_segment(segment)
-            rows.append(f"{date}, {category_segment}")
+    case_starts = [m.start() for m in re.finditer(r"^###\s+", plain, flags=re.MULTILINE)]
+    for idx, start in enumerate(case_starts):
+        end = case_starts[idx + 1] if idx + 1 < len(case_starts) else len(plain)
+        block = plain[start:end].strip()
+        if not block:
+            continue
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        def _collect_section(section_name):
+            items = []
+            for i, line in enumerate(lines):
+                if line.lower() == section_name.lower():
+                    for next_line in lines[i + 1:]:
+                        if next_line.lower() in [
+                            "категория",
+                            "истцы",
+                            "ответчики",
+                            "другие участники",
+                            "судья",
+                            "движение по делу",
+                            "регистрация",
+                            "посмотреть дело",
+                        ]:
+                            break
+                        items.append(next_line)
+                    break
+            return items
+        plaintiffs = _collect_section("Истцы")
+        defendants = _collect_section("Ответчики")
+        reg_date = None
+        for i, line in enumerate(lines):
+            if line.lower() == "регистрация" and i + 1 < len(lines):
+                reg_date = lines[i + 1]
+                break
+        if plaintiffs or defendants or reg_date:
+            rows.append(
+                "Дата регистрации: {date}; Истцы: {plaintiffs}; Ответчики: {defendants}".format(
+                    date=reg_date or "не указана",
+                    plaintiffs=", ".join(plaintiffs) if plaintiffs else "не указаны",
+                    defendants=", ".join(defendants) if defendants else "не указаны",
+                )
+            )
     return rows
 
 def process_and_save(markdown_text):
@@ -760,21 +759,15 @@ def bitrix_webhook():
                     if fetch_err:
                         bitrix_send_message(
                             dialog_id_for_response,
-                            "Сайт суда блокирует автоматический запрос (403). "
-                            "Нужна ручная капча в браузере, иначе данные недоступны."
+                            "Сайт с данными заблокировал запрос. "
+                            "Попробуйте позже или вручную открыть страницу."
                         )
                         return
                     rows = parse_sud_cases(html_text)
                     if rows:
                         response = "\n".join(f"{i + 1}. {row}" for i, row in enumerate(rows))
                     else:
-                        if re.search(r"captcha", html_text, flags=re.IGNORECASE):
-                            response = (
-                                "Сайт суда вернул страницу с капчей. "
-                                "Без ручного прохождения капчи результаты недоступны."
-                            )
-                        else:
-                            response = "Ничего не найдено по указанному запросу."
+                        response = "Ничего не найдено по указанному запросу."
                     bitrix_send_long_message(dialog_id_for_response, response)
                 except Exception as e:
                     bitrix_send_message(dialog_id_for_response, f"❌ Ошибка при запросе суда: {e}")
@@ -937,21 +930,15 @@ async def sud_command(update: Update, context):
         html_text, fetch_err = fetch_sud_cases()
         if fetch_err:
             await update.message.reply_text(
-                "Сайт суда блокирует автоматический запрос (403). "
-                "Нужна ручная капча в браузере, иначе данные недоступны."
+                "Сайт с данными заблокировал запрос. "
+                "Попробуйте позже или вручную открыть страницу."
             )
             return
         rows = parse_sud_cases(html_text)
         if rows:
             response = "\n".join(f"{i + 1}. {row}" for i, row in enumerate(rows))
         else:
-            if re.search(r"captcha", html_text, flags=re.IGNORECASE):
-                response = (
-                    "Сайт суда вернул страницу с капчей. "
-                    "Без ручного прохождения капчи результаты недоступны."
-                )
-            else:
-                response = "Ничего не найдено по указанному запросу."
+            response = "Ничего не найдено по указанному запросу."
         await update.message.reply_text(response)
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка при запросе суда: {e}")
