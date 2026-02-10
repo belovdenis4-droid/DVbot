@@ -32,6 +32,10 @@ BITRIX_CLIENT_ID = os.environ.get("BITRIX_CLIENT_ID")
 BITRIX_EVENT_HANDLER_URL = os.environ.get("BITRIX_EVENT_HANDLER_URL")
 BITRIX_APP_ACCESS_TOKEN = os.environ.get("BITRIX_APP_ACCESS_TOKEN")
 BITRIX_PORTAL_URL = os.environ.get("BITRIX_PORTAL_URL")
+BITRIX_APP_CLIENT_ID = os.environ.get("BITRIX_APP_CLIENT_ID")
+BITRIX_APP_CLIENT_SECRET = os.environ.get("BITRIX_APP_CLIENT_SECRET")
+BITRIX_APP_REDIRECT_URL = os.environ.get("BITRIX_APP_REDIRECT_URL")
+BITRIX_OAUTH_URL = os.environ.get("BITRIX_OAUTH_URL", "https://oauth.bitrix.info/oauth/token/")
 BITRIX_CLIENT_IDS = [c.strip() for c in os.environ.get("BITRIX_CLIENT_IDS", "").split(",") if c.strip()]
 if BITRIX_CLIENT_ID:
     BITRIX_CLIENT_IDS.append(BITRIX_CLIENT_ID)
@@ -70,6 +74,41 @@ app = Flask(__name__)
 @app.route('/', methods=['GET'])
 def index():
     return "Бот активен и слушает события Битрикс24 (локальное приложение).", 200
+
+@app.route('/bitrix/install', methods=['GET'])
+def bitrix_install():
+    code = request.args.get("code")
+    if not code:
+        return "Missing code parameter.", 400
+    if not all([BITRIX_APP_CLIENT_ID, BITRIX_APP_CLIENT_SECRET, BITRIX_APP_REDIRECT_URL]):
+        return "Missing BITRIX_APP_CLIENT_ID/SECRET/REDIRECT_URL in environment.", 500
+    try:
+        params = {
+            "grant_type": "authorization_code",
+            "client_id": BITRIX_APP_CLIENT_ID,
+            "client_secret": BITRIX_APP_CLIENT_SECRET,
+            "code": code,
+            "redirect_uri": BITRIX_APP_REDIRECT_URL,
+        }
+        token_res = requests.get(BITRIX_OAUTH_URL, params=params)
+        token_res.raise_for_status()
+        token_json = token_res.json()
+        access_token = token_json.get("access_token")
+        refresh_token = token_json.get("refresh_token")
+        if access_token:
+            return (
+                "OK\n"
+                f"access_token={access_token}\n"
+                f"refresh_token={refresh_token}\n"
+                f"expires_in={token_json.get('expires_in')}\n"
+                f"member_id={token_json.get('member_id')}\n"
+                f"domain={token_json.get('domain')}\n",
+                200,
+            )
+        return f"Token error: {token_json}", 400
+    except Exception as e:
+        logger.error(f"OAuth token error: {e}", exc_info=True)
+        return f"OAuth error: {e}", 500
 
 # ---------- ОБЩАЯ ЛОГИКА ОБРАБОТКИ ----------
 
