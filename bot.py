@@ -8,6 +8,7 @@ import re
 import requests
 import time
 from pathlib import Path
+import html
 from flask import Flask, request, jsonify
 from threading import Thread
 from datetime import datetime # НОВОЕ: Добавлен импорт datetime
@@ -193,6 +194,31 @@ def summarize_ocr_promos(text):
     summary_lines.append(f"[b]Базовая: {base_count}[/b]")
     summary = "\n".join(summary_lines)
     return summary
+
+def _strip_html(value):
+    text = re.sub(r"<[^>]+>", " ", value or "")
+    text = html.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+def fetch_sud_cases():
+    url = "https://yaroslavsky--jrs.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=r&delo_id=1540005&case_type=0&new=0&G1_PARTS__NAMESS=%C1%E5%EB%EE%E2&g1_case__CASE_NUMBERSS=&g1_case__JUDICIAL_UIDSS=&captcha=93493&captchaid=74fkvjsd5j7lt68aac8dl4hco4&delo_table=g1_case&g1_case__ENTRY_DATE1D=01.12.2025&g1_case__ENTRY_DATE2D=&G1_CASE__JUDGE=&g1_case__RESULT_DATE1D=&g1_case__RESULT_DATE2D=&G1_CASE__RESULT=&G1_CASE__BUILDING_ID=&G1_CASE__COURT_STRUCT=&G1_EVENT__EVENT_NAME=&G1_EVENT__EVENT_DATEDD=&G1_PARTS__PARTS_TYPE=&G1_PARTS__INN_STRSS=&G1_PARTS__KPP_STRSS=&G1_PARTS__OGRN_STRSS=&G1_PARTS__OGRNIP_STRSS=&G1_RKN_ACCESS_RESTRICTION__RKN_REASON=&g1_rkn_access_restriction__RKN_RESTRICT_URLSS=&g1_requirement__ACCESSION_DATE1D=&g1_requirement__ACCESSION_DATE2D=&G1_REQUIREMENT__CATEGORY=&G1_REQUIREMENT__ESSENCESS=&G1_REQUIREMENT__JOIN_END_DATE1D=&G1_REQUIREMENT__JOIN_END_DATE2D=&G1_REQUIREMENT__PUBLICATION_ID=&G1_DOCUMENT__PUBL_DATE1D=&G1_DOCUMENT__PUBL_DATE2D=&G1_CASE__VALIDITY_DATE1D=&G1_CASE__VALIDITY_DATE2D=&G1_ORDER_INFO__ORDER_DATE1D=&G1_ORDER_INFO__ORDER_DATE2D=&G1_ORDER_INFO__ORDER_NUMSS=&G1_ORDER_INFO__EXTERNALKEYSS=&G1_ORDER_INFO__STATE_ID=&G1_ORDER_INFO__RECIP_ID=&Submit=%CD%E0%E9%F2%E8"
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+    return response.text
+
+def parse_sud_cases(html_text):
+    rows = []
+    for row_html in re.findall(r"<tr[^>]*>(.*?)</tr>", html_text, flags=re.DOTALL | re.IGNORECASE):
+        if "case_id=" not in row_html:
+            continue
+        cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row_html, flags=re.DOTALL | re.IGNORECASE)
+        cleaned = [_strip_html(cell) for cell in cells]
+        if len(cleaned) >= 3:
+            date = cleaned[1]
+            category = cleaned[2]
+            if date and category:
+                rows.append(f"{date}, {category}")
+    return rows
 
 def process_and_save(markdown_text):
     rows = []
@@ -651,6 +677,19 @@ def bitrix_webhook():
                     "Команда 'look' + изображение: верну весь распознанный текст."
                 )
             
+            elif message_text.lower() == "sud":
+                try:
+                    html_text = fetch_sud_cases()
+                    rows = parse_sud_cases(html_text)
+                    if rows:
+                        response = "\n".join(f"{i + 1}. {row}" for i, row in enumerate(rows))
+                    else:
+                        response = "Ничего не найдено по указанному запросу."
+                    bitrix_send_long_message(dialog_id_for_response, response)
+                except Exception as e:
+                    bitrix_send_message(dialog_id_for_response, f"❌ Ошибка при запросе суда: {e}")
+                    logger.error(f"Ошибка sud: {e}", exc_info=True)
+            
             # НОВОЕ: БЛОК: Запись любого другого текста в таблицу "Тест"
             else:
                 try:
@@ -803,6 +842,19 @@ async def handle_tg_doc(update: Update, context):
     else:
         await update.message.reply_text("Пожалуйста, отправьте PDF файл.")
 
+async def sud_command(update: Update, context):
+    try:
+        html_text = fetch_sud_cases()
+        rows = parse_sud_cases(html_text)
+        if rows:
+            response = "\n".join(f"{i + 1}. {row}" for i, row in enumerate(rows))
+        else:
+            response = "Ничего не найдено по указанному запросу."
+        await update.message.reply_text(response)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка при запросе суда: {e}")
+        logger.error(f"Ошибка sud (Telegram): {e}", exc_info=True)
+
 # ---------- ЗАПУСК ----------
 
 def run_flask():
@@ -819,6 +871,7 @@ async def main():
     
     # Добавляем обработчики команд и сообщений
     tg_app.add_handler(CommandHandler("check_bitrix", check_bitrix))
+    tg_app.add_handler(CommandHandler("sud", sud_command))
     tg_app.add_handler(MessageHandler(filters.Document.PDF, handle_tg_doc))
     
     logger.info("🚀 Бот (Telegram + Bitrix) запущен. Ожидание команд...")
