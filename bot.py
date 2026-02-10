@@ -75,9 +75,15 @@ app = Flask(__name__)
 def index():
     return "Бот активен и слушает события Битрикс24 (локальное приложение).", 200
 
-def exchange_oauth_code(code):
+def exchange_oauth_code(code, server_domain=None):
     if not all([BITRIX_APP_CLIENT_ID, BITRIX_APP_CLIENT_SECRET, BITRIX_APP_REDIRECT_URL]):
         return None, "Missing BITRIX_APP_CLIENT_ID/SECRET/REDIRECT_URL in environment."
+    token_url = BITRIX_OAUTH_URL
+    if server_domain:
+        if server_domain.startswith("http"):
+            token_url = f"{server_domain.rstrip('/')}/oauth/token/"
+        else:
+            token_url = f"https://{server_domain}/oauth/token/"
     params = {
         "grant_type": "authorization_code",
         "client_id": BITRIX_APP_CLIENT_ID,
@@ -85,7 +91,7 @@ def exchange_oauth_code(code):
         "code": code,
         "redirect_uri": BITRIX_APP_REDIRECT_URL,
     }
-    token_res = requests.get(BITRIX_OAUTH_URL, params=params)
+    token_res = requests.get(token_url, params=params)
     token_res.raise_for_status()
     return token_res.json(), None
 
@@ -97,7 +103,7 @@ def bitrix_install():
             return "OK", 200
         return "Missing code parameter.", 400
     try:
-        token_json, err = exchange_oauth_code(code)
+        token_json, err = exchange_oauth_code(code, request.values.get("server_domain"))
         if err:
             return err, 500
         access_token = token_json.get("access_token")
@@ -257,7 +263,10 @@ def bitrix_webhook():
         logger.info(f"Bitrix GET /bitrix query={dict(request.args)}")
         if request.args.get("code"):
             try:
-                token_json, err = exchange_oauth_code(request.args.get("code"))
+                token_json, err = exchange_oauth_code(
+                    request.args.get("code"),
+                    request.args.get("server_domain"),
+                )
                 if err:
                     return err, 500
                 access_token = token_json.get("access_token")
