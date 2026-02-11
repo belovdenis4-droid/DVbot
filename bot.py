@@ -507,7 +507,19 @@ def bitrix_webhook():
             logger.info(f"Bitrix APP_SID ping: {data.get('APP_SID')}")
             return "OK", 200
         if data.get('auth[client_id]') or (json_data.get('auth') or {}).get('client_id'):
-            logger.info("Bitrix app ping with auth client_id")
+            auth_payload = _extract_auth_payload(data, json_data)
+            logger.info(
+                "Bitrix app ping with auth client_id=%s domain=%s access=%s",
+                _mask_token(auth_payload.get("client_id")),
+                auth_payload.get("domain"),
+                _mask_token(auth_payload.get("access_token")),
+            )
+            if auth_payload.get("access_token"):
+                LAST_APP_AUTH.update(auth_payload)
+                if BITRIX_EVENT_HANDLER_URL:
+                    portal_url = f"https://{auth_payload.get('domain')}" if auth_payload.get("domain") else get_bitrix_portal_url()
+                    bind_res = bind_onimmessageadd(auth_payload.get("access_token"), portal_url, BITRIX_EVENT_HANDLER_URL)
+                    logger.info("event.bind during app ping: %s", bind_res)
             return "OK", 200
     
     # 1. Проверка токена (безопасность)
