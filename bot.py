@@ -460,7 +460,7 @@ def bitrix_send_long_message(dialog_id, text, chunk_size=3000):
 
 @app.route('/bitrix', methods=['GET', 'POST'])
 def bitrix_webhook():
-    if request.method == 'GET':
+    if request.method in ['GET', 'HEAD']:
         logger.info(f"Bitrix GET /bitrix query={dict(request.args)}")
         if request.args.get("code"):
             try:
