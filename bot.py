@@ -129,8 +129,14 @@ def bind_onimmessageadd(access_token, portal_url, handler_url):
     }
     return requests.post(bind_url, params={"auth": access_token}, json=bind_payload).json()
 
-@app.route('/bitrix/install', methods=['GET', 'POST'])
+@app.route('/bitrix/install', methods=['GET', 'POST'], strict_slashes=False)
 def bitrix_install():
+    logger.info(
+        "Bitrix install callback method=%s keys=%s args=%s",
+        request.method,
+        list(request.values.keys()),
+        dict(request.args),
+    )
     code = request.values.get("code")
     json_data = request.get_json(silent=True) or {}
     auth_payload = _extract_auth_payload(request.values, json_data)
