@@ -796,7 +796,7 @@ def bitrix_webhook():
 
         # --- Обработка вложений (файлов) ---
         if files_data:
-            if event == 'ONIMMESSAGEADD' and not BITRIX_GROUP_AUTO and not is_bot_mentioned(message_text):
+            if event == 'ONIMMESSAGEADD' and not is_bot_mentioned(message_text):
                 bitrix_send_message(
                     dialog_id_for_response,
                     "ℹ️ Чтобы обработать PDF в групповом чате, упомяните бота в тексте сообщения "
@@ -860,7 +860,7 @@ def bitrix_webhook():
                     continue
         
         # --- Обработка текстовых команд ---
-        if message_text:
+        if message_text and (event != 'ONIMMESSAGEADD' or is_bot_mentioned(message_text)):
             if message_text.lower() == "статус": 
                 try:
                     if main_data_sheet.row_count > 0: # Используем main_data_sheet
