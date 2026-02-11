@@ -146,6 +146,18 @@ def bind_onimmessageadd(access_token, portal_url, handler_url, rest_endpoint=Non
         last_res["event_name"] = variants[-1]
     return last_res
 
+def get_bitrix_events(access_token, portal_url, rest_endpoint=None):
+    if not access_token:
+        return []
+    if rest_endpoint:
+        url = f"{rest_endpoint.rstrip('/')}/event.get.json"
+    elif portal_url:
+        url = f"{portal_url.rstrip('/')}/rest/event.get.json"
+    else:
+        return []
+    res = requests.post(url, params={"auth": access_token}).json()
+    return res.get("result", []) if isinstance(res, dict) else []
+
 @app.route('/bitrix/install', methods=['GET', 'POST'], strict_slashes=False)
 def bitrix_install():
     logger.info(
@@ -176,6 +188,9 @@ def bitrix_install():
                 rest_endpoint=rest_endpoint,
             )
             logger.info("event.bind during install: %s", bind_res)
+            available_events = get_bitrix_events(auth_payload.get("access_token"), portal_url, rest_endpoint=rest_endpoint)
+            has_onim = any(ev.get("event") in ["OnImMessageAdd", "onimmessageadd", "ONIMMESSAGEADD"] for ev in available_events if isinstance(ev, dict))
+            logger.info("event.get count=%s has_onimmessageadd=%s", len(available_events), has_onim)
         return (
             "OK\n"
             f"access_token={auth_payload.get('access_token')}\n"
