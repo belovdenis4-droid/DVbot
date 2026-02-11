@@ -41,6 +41,7 @@ BITRIX_OAUTH_URL = os.environ.get("BITRIX_OAUTH_URL", "https://oauth.bitrix.info
 BITRIX_CLIENT_IDS = [c.strip() for c in os.environ.get("BITRIX_CLIENT_IDS", "").split(",") if c.strip()]
 if BITRIX_CLIENT_ID:
     BITRIX_CLIENT_IDS.append(BITRIX_CLIENT_ID)
+LAST_APP_AUTH = {}
 
 # ID разрешенных чатов Битрикс (для ONIMMESSAGEADD), если используется
 ALLOWED_BX_CHATS = os.environ.get("ALLOWED_BITRIX_CHATS", "").replace(" ", "").split(",")
@@ -97,9 +98,64 @@ def exchange_oauth_code(code, server_domain=None):
     token_res.raise_for_status()
     return token_res.json(), None
 
+def _extract_auth_payload(form_data, json_data):
+    auth = {
+        "access_token": form_data.get("auth[access_token]") or (json_data.get("auth") or {}).get("access_token"),
+        "refresh_token": form_data.get("auth[refresh_token]") or (json_data.get("auth") or {}).get("refresh_token"),
+        "client_id": form_data.get("auth[client_id]") or (json_data.get("auth") or {}).get("client_id"),
+        "application_token": form_data.get("auth[application_token]") or (json_data.get("auth") or {}).get("application_token"),
+        "domain": form_data.get("auth[domain]") or (json_data.get("auth") or {}).get("domain"),
+        "member_id": form_data.get("auth[member_id]") or (json_data.get("auth") or {}).get("member_id"),
+        "expires_in": form_data.get("auth[expires_in]") or (json_data.get("auth") or {}).get("expires_in"),
+    }
+    return auth
+
+def _mask_token(value):
+    if not value:
+        return "none"
+    value = str(value)
+    if len(value) <= 6:
+        return f"{value[0]}...{value[-1]}(len={len(value)})"
+    return f"{value[:3]}...{value[-3:]}(len={len(value)})"
+
+def bind_onimmessageadd(access_token, portal_url, handler_url):
+    if not (access_token and portal_url and handler_url):
+        return {"error": "missing_params"}
+    bind_url = f"{portal_url.rstrip('/')}/rest/event.bind.json"
+    bind_payload = {
+        "event": "ONIMMESSAGEADD",
+        "handler": handler_url,
+        "auth_type": 1,
+    }
+    return requests.post(bind_url, params={"auth": access_token}, json=bind_payload).json()
+
 @app.route('/bitrix/install', methods=['GET', 'POST'])
 def bitrix_install():
     code = request.values.get("code")
+    json_data = request.get_json(silent=True) or {}
+    auth_payload = _extract_auth_payload(request.values, json_data)
+    if auth_payload.get("access_token"):
+        LAST_APP_AUTH.update(auth_payload)
+        logger.info(
+            "Bitrix install auth received: client_id=%s domain=%s member_id=%s access=%s",
+            _mask_token(auth_payload.get("client_id")),
+            auth_payload.get("domain"),
+            _mask_token(auth_payload.get("member_id")),
+            _mask_token(auth_payload.get("access_token")),
+        )
+        if BITRIX_EVENT_HANDLER_URL:
+            portal_url = f"https://{auth_payload.get('domain')}" if auth_payload.get("domain") else get_bitrix_portal_url()
+            bind_res = bind_onimmessageadd(auth_payload.get("access_token"), portal_url, BITRIX_EVENT_HANDLER_URL)
+            logger.info("event.bind during install: %s", bind_res)
+        return (
+            "OK\n"
+            f"access_token={auth_payload.get('access_token')}\n"
+            f"refresh_token={auth_payload.get('refresh_token')}\n"
+            f"expires_in={auth_payload.get('expires_in')}\n"
+            f"member_id={auth_payload.get('member_id')}\n"
+            f"domain={auth_payload.get('domain')}\n",
+            200,
+        )
     if not code:
         if request.values.get("APP_SID"):
             return "OK", 200
@@ -433,14 +489,6 @@ def bitrix_webhook():
         return "OK", 200
     data = request.form
     json_data = request.get_json(silent=True) or {}
-    def _mask_token(value):
-        if not value:
-            return "none"
-        value = str(value)
-        if len(value) <= 6:
-            return f"{value[0]}...{value[-1]}(len={len(value)})"
-        return f"{value[:3]}...{value[-3:]}(len={len(value)})"
-
     if data.get('APP_SID') or request.args.get('APP_SID') or data.get('auth[client_id]') or (json_data.get('auth') or {}).get('client_id'):
         access_token = (
             data.get('auth[access_token]')
@@ -775,6 +823,23 @@ def bitrix_webhook():
                 except Exception as e:
                     bitrix_send_message(dialog_id_for_response, f"❌ Ошибка при запросе суда: {e}")
                     logger.error(f"Ошибка sud: {e}", exc_info=True)
+
+    if event == "ONAPPINSTALL":
+        auth_payload = _extract_auth_payload(data, json_data)
+        if auth_payload.get("access_token"):
+            LAST_APP_AUTH.update(auth_payload)
+            logger.info(
+                "Bitrix app install auth received: client_id=%s domain=%s member_id=%s access=%s",
+                _mask_token(auth_payload.get("client_id")),
+                auth_payload.get("domain"),
+                _mask_token(auth_payload.get("member_id")),
+                _mask_token(auth_payload.get("access_token")),
+            )
+            if BITRIX_EVENT_HANDLER_URL:
+                portal_url = f"https://{auth_payload.get('domain')}" if auth_payload.get("domain") else get_bitrix_portal_url()
+                bind_res = bind_onimmessageadd(auth_payload.get("access_token"), portal_url, BITRIX_EVENT_HANDLER_URL)
+                logger.info("event.bind during install: %s", bind_res)
+        return "OK", 200
             
             # НОВОЕ: БЛОК: Запись любого другого текста в таблицу "Тест"
             else:
