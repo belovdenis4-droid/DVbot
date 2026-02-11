@@ -118,7 +118,7 @@ def _mask_token(value):
         return f"{value[0]}...{value[-1]}(len={len(value)})"
     return f"{value[:3]}...{value[-3:]}(len={len(value)})"
 
-def bind_onimmessageadd(access_token, portal_url, handler_url, rest_endpoint=None):
+def bind_events(access_token, portal_url, handler_url, event_names, rest_endpoint=None):
     if not (access_token and handler_url):
         return {"error": "missing_params"}
     if rest_endpoint:
@@ -127,7 +127,7 @@ def bind_onimmessageadd(access_token, portal_url, handler_url, rest_endpoint=Non
         bind_url = f"{portal_url.rstrip('/')}/rest/event.bind.json"
     else:
         return {"error": "missing_endpoint"}
-    variants = ["OnImMessageAdd", "onimmessageadd", "ONIMMESSAGEADD"]
+    variants = list(event_names or [])
     last_res = None
     for event_name in variants:
         for auth_type in [1, None]:
@@ -143,7 +143,7 @@ def bind_onimmessageadd(access_token, portal_url, handler_url, rest_endpoint=Non
                 last_res["auth_type"] = auth_type
                 return last_res
     if isinstance(last_res, dict):
-        last_res["event_name"] = variants[-1]
+        last_res["event_name"] = variants[-1] if variants else None
     return last_res
 
 def get_bitrix_events(access_token, portal_url, rest_endpoint=None):
@@ -181,16 +181,25 @@ def bitrix_install():
         if BITRIX_EVENT_HANDLER_URL:
             portal_url = f"https://{auth_payload.get('domain')}" if auth_payload.get("domain") else get_bitrix_portal_url()
             rest_endpoint = auth_payload.get("client_endpoint") or auth_payload.get("server_endpoint")
-            bind_res = bind_onimmessageadd(
+            available_events = get_bitrix_events(auth_payload.get("access_token"), portal_url, rest_endpoint=rest_endpoint)
+            available_names = [ev.get("event") for ev in available_events if isinstance(ev, dict) and ev.get("event")]
+            logger.info("event.get count=%s names=%s", len(available_names), available_names[:30])
+            im_events = ["OnImMessageAdd", "onimmessageadd", "ONIMMESSAGEADD"]
+            ol_events = ["OnImOpenLineMessageAdd", "onimopenlinemessageadd", "ONIMOPENLINEMESSAGEADD"]
+            if any(name in available_names for name in im_events):
+                event_candidates = im_events
+            elif any(name in available_names for name in ol_events):
+                event_candidates = ol_events
+            else:
+                event_candidates = im_events
+            bind_res = bind_events(
                 auth_payload.get("access_token"),
                 portal_url,
                 BITRIX_EVENT_HANDLER_URL,
+                event_candidates,
                 rest_endpoint=rest_endpoint,
             )
             logger.info("event.bind during install: %s", bind_res)
-            available_events = get_bitrix_events(auth_payload.get("access_token"), portal_url, rest_endpoint=rest_endpoint)
-            has_onim = any(ev.get("event") in ["OnImMessageAdd", "onimmessageadd", "ONIMMESSAGEADD"] for ev in available_events if isinstance(ev, dict))
-            logger.info("event.get count=%s has_onimmessageadd=%s", len(available_events), has_onim)
         return (
             "OK\n"
             f"access_token={auth_payload.get('access_token')}\n"
@@ -563,10 +572,22 @@ def bitrix_webhook():
                 if BITRIX_EVENT_HANDLER_URL:
                     portal_url = f"https://{auth_payload.get('domain')}" if auth_payload.get("domain") else get_bitrix_portal_url()
                     rest_endpoint = auth_payload.get("client_endpoint") or auth_payload.get("server_endpoint")
-                    bind_res = bind_onimmessageadd(
+                    available_events = get_bitrix_events(auth_payload.get("access_token"), portal_url, rest_endpoint=rest_endpoint)
+                    available_names = [ev.get("event") for ev in available_events if isinstance(ev, dict) and ev.get("event")]
+                    logger.info("event.get count=%s names=%s", len(available_names), available_names[:30])
+                    im_events = ["OnImMessageAdd", "onimmessageadd", "ONIMMESSAGEADD"]
+                    ol_events = ["OnImOpenLineMessageAdd", "onimopenlinemessageadd", "ONIMOPENLINEMESSAGEADD"]
+                    if any(name in available_names for name in im_events):
+                        event_candidates = im_events
+                    elif any(name in available_names for name in ol_events):
+                        event_candidates = ol_events
+                    else:
+                        event_candidates = im_events
+                    bind_res = bind_events(
                         auth_payload.get("access_token"),
                         portal_url,
                         BITRIX_EVENT_HANDLER_URL,
+                        event_candidates,
                         rest_endpoint=rest_endpoint,
                     )
                     logger.info("event.bind during app ping: %s", bind_res)
@@ -937,10 +958,22 @@ def bitrix_webhook():
             if BITRIX_EVENT_HANDLER_URL:
                 portal_url = f"https://{auth_payload.get('domain')}" if auth_payload.get("domain") else get_bitrix_portal_url()
                 rest_endpoint = auth_payload.get("client_endpoint") or auth_payload.get("server_endpoint")
-                bind_res = bind_onimmessageadd(
+                available_events = get_bitrix_events(auth_payload.get("access_token"), portal_url, rest_endpoint=rest_endpoint)
+                available_names = [ev.get("event") for ev in available_events if isinstance(ev, dict) and ev.get("event")]
+                logger.info("event.get count=%s names=%s", len(available_names), available_names[:30])
+                im_events = ["OnImMessageAdd", "onimmessageadd", "ONIMMESSAGEADD"]
+                ol_events = ["OnImOpenLineMessageAdd", "onimopenlinemessageadd", "ONIMOPENLINEMESSAGEADD"]
+                if any(name in available_names for name in im_events):
+                    event_candidates = im_events
+                elif any(name in available_names for name in ol_events):
+                    event_candidates = ol_events
+                else:
+                    event_candidates = im_events
+                bind_res = bind_events(
                     auth_payload.get("access_token"),
                     portal_url,
                     BITRIX_EVENT_HANDLER_URL,
+                    event_candidates,
                     rest_endpoint=rest_endpoint,
                 )
                 logger.info("event.bind during install: %s", bind_res)
