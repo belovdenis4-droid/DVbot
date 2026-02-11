@@ -824,23 +824,6 @@ def bitrix_webhook():
                     bitrix_send_message(dialog_id_for_response, f"❌ Ошибка при запросе суда: {e}")
                     logger.error(f"Ошибка sud: {e}", exc_info=True)
 
-    if event == "ONAPPINSTALL":
-        auth_payload = _extract_auth_payload(data, json_data)
-        if auth_payload.get("access_token"):
-            LAST_APP_AUTH.update(auth_payload)
-            logger.info(
-                "Bitrix app install auth received: client_id=%s domain=%s member_id=%s access=%s",
-                _mask_token(auth_payload.get("client_id")),
-                auth_payload.get("domain"),
-                _mask_token(auth_payload.get("member_id")),
-                _mask_token(auth_payload.get("access_token")),
-            )
-            if BITRIX_EVENT_HANDLER_URL:
-                portal_url = f"https://{auth_payload.get('domain')}" if auth_payload.get("domain") else get_bitrix_portal_url()
-                bind_res = bind_onimmessageadd(auth_payload.get("access_token"), portal_url, BITRIX_EVENT_HANDLER_URL)
-                logger.info("event.bind during install: %s", bind_res)
-        return "OK", 200
-            
             # НОВОЕ: БЛОК: Запись любого другого текста в таблицу "Тест"
             else:
                 try:
@@ -877,6 +860,23 @@ def bitrix_webhook():
                 except Exception as e:
                     bitrix_send_message(dialog_id_for_response, f"❌ Ошибка при добавлении текста в таблицу 'Тест': {e}")
                     logger.error(f"Ошибка при добавлении текста из Битрикс в таблицу 'Тест': {e}", exc_info=True)
+
+    if event == "ONAPPINSTALL":
+        auth_payload = _extract_auth_payload(data, json_data)
+        if auth_payload.get("access_token"):
+            LAST_APP_AUTH.update(auth_payload)
+            logger.info(
+                "Bitrix app install auth received: client_id=%s domain=%s member_id=%s access=%s",
+                _mask_token(auth_payload.get("client_id")),
+                auth_payload.get("domain"),
+                _mask_token(auth_payload.get("member_id")),
+                _mask_token(auth_payload.get("access_token")),
+            )
+            if BITRIX_EVENT_HANDLER_URL:
+                portal_url = f"https://{auth_payload.get('domain')}" if auth_payload.get("domain") else get_bitrix_portal_url()
+                bind_res = bind_onimmessageadd(auth_payload.get("access_token"), portal_url, BITRIX_EVENT_HANDLER_URL)
+                logger.info("event.bind during install: %s", bind_res)
+        return "OK", 200
 
     return "OK", 200 # Возвращаем OK, чтобы Битрикс знал, что сообщение получено
 
