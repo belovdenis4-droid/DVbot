@@ -118,22 +118,30 @@ def _mask_token(value):
         return f"{value[0]}...{value[-1]}(len={len(value)})"
     return f"{value[:3]}...{value[-3:]}(len={len(value)})"
 
-def bind_onimmessageadd(access_token, portal_url, handler_url):
-    if not (access_token and portal_url and handler_url):
+def bind_onimmessageadd(access_token, portal_url, handler_url, rest_endpoint=None):
+    if not (access_token and handler_url):
         return {"error": "missing_params"}
-    bind_url = f"{portal_url.rstrip('/')}/rest/event.bind.json"
+    if rest_endpoint:
+        bind_url = f"{rest_endpoint.rstrip('/')}/event.bind.json"
+    elif portal_url:
+        bind_url = f"{portal_url.rstrip('/')}/rest/event.bind.json"
+    else:
+        return {"error": "missing_endpoint"}
     variants = ["OnImMessageAdd", "onimmessageadd", "ONIMMESSAGEADD"]
     last_res = None
     for event_name in variants:
-        bind_payload = {
-            "event": event_name,
-            "handler": handler_url,
-            "auth_type": 1,
-        }
-        last_res = requests.post(bind_url, params={"auth": access_token}, json=bind_payload).json()
-        if last_res.get("result") is True:
-            last_res["event_name"] = event_name
-            return last_res
+        for auth_type in [1, None]:
+            bind_payload = {
+                "event": event_name,
+                "handler": handler_url,
+            }
+            if auth_type is not None:
+                bind_payload["auth_type"] = auth_type
+            last_res = requests.post(bind_url, params={"auth": access_token}, json=bind_payload).json()
+            if last_res.get("result") is True:
+                last_res["event_name"] = event_name
+                last_res["auth_type"] = auth_type
+                return last_res
     if isinstance(last_res, dict):
         last_res["event_name"] = variants[-1]
     return last_res
@@ -160,7 +168,13 @@ def bitrix_install():
         )
         if BITRIX_EVENT_HANDLER_URL:
             portal_url = f"https://{auth_payload.get('domain')}" if auth_payload.get("domain") else get_bitrix_portal_url()
-            bind_res = bind_onimmessageadd(auth_payload.get("access_token"), portal_url, BITRIX_EVENT_HANDLER_URL)
+            rest_endpoint = auth_payload.get("client_endpoint") or auth_payload.get("server_endpoint")
+            bind_res = bind_onimmessageadd(
+                auth_payload.get("access_token"),
+                portal_url,
+                BITRIX_EVENT_HANDLER_URL,
+                rest_endpoint=rest_endpoint,
+            )
             logger.info("event.bind during install: %s", bind_res)
         return (
             "OK\n"
@@ -533,7 +547,13 @@ def bitrix_webhook():
                 LAST_APP_AUTH.update(auth_payload)
                 if BITRIX_EVENT_HANDLER_URL:
                     portal_url = f"https://{auth_payload.get('domain')}" if auth_payload.get("domain") else get_bitrix_portal_url()
-                    bind_res = bind_onimmessageadd(auth_payload.get("access_token"), portal_url, BITRIX_EVENT_HANDLER_URL)
+                    rest_endpoint = auth_payload.get("client_endpoint") or auth_payload.get("server_endpoint")
+                    bind_res = bind_onimmessageadd(
+                        auth_payload.get("access_token"),
+                        portal_url,
+                        BITRIX_EVENT_HANDLER_URL,
+                        rest_endpoint=rest_endpoint,
+                    )
                     logger.info("event.bind during app ping: %s", bind_res)
             return "OK", 200
     
@@ -901,7 +921,13 @@ def bitrix_webhook():
             )
             if BITRIX_EVENT_HANDLER_URL:
                 portal_url = f"https://{auth_payload.get('domain')}" if auth_payload.get("domain") else get_bitrix_portal_url()
-                bind_res = bind_onimmessageadd(auth_payload.get("access_token"), portal_url, BITRIX_EVENT_HANDLER_URL)
+                rest_endpoint = auth_payload.get("client_endpoint") or auth_payload.get("server_endpoint")
+                bind_res = bind_onimmessageadd(
+                    auth_payload.get("access_token"),
+                    portal_url,
+                    BITRIX_EVENT_HANDLER_URL,
+                    rest_endpoint=rest_endpoint,
+                )
                 logger.info("event.bind during install: %s", bind_res)
         return "OK", 200
 
