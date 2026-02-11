@@ -122,12 +122,21 @@ def bind_onimmessageadd(access_token, portal_url, handler_url):
     if not (access_token and portal_url and handler_url):
         return {"error": "missing_params"}
     bind_url = f"{portal_url.rstrip('/')}/rest/event.bind.json"
-    bind_payload = {
-        "event": "ONIMMESSAGEADD",
-        "handler": handler_url,
-        "auth_type": 1,
-    }
-    return requests.post(bind_url, params={"auth": access_token}, json=bind_payload).json()
+    variants = ["OnImMessageAdd", "onimmessageadd", "ONIMMESSAGEADD"]
+    last_res = None
+    for event_name in variants:
+        bind_payload = {
+            "event": event_name,
+            "handler": handler_url,
+            "auth_type": 1,
+        }
+        last_res = requests.post(bind_url, params={"auth": access_token}, json=bind_payload).json()
+        if last_res.get("result") is True:
+            last_res["event_name"] = event_name
+            return last_res
+    if isinstance(last_res, dict):
+        last_res["event_name"] = variants[-1]
+    return last_res
 
 @app.route('/bitrix/install', methods=['GET', 'POST'], strict_slashes=False)
 def bitrix_install():
