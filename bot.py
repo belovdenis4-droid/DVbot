@@ -45,6 +45,9 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_API_URL = os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 GROQ_TEMPERATURE = float(os.environ.get("GROQ_TEMPERATURE", "0.2"))
+COZE_API_KEY = os.environ.get("COZE_API_KEY")
+COZE_API_URL = os.environ.get("COZE_API_URL", "https://api.coze.com/open_api/v2/chat")
+COZE_BOT_ID = os.environ.get("COZE_BOT_ID")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 DEEPSEEK_API_URL = os.environ.get("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
@@ -375,6 +378,34 @@ def find_kb_answer(query):
     }
 
 def _generate_ai_response(question, kb_text, source_name):
+    if COZE_API_KEY and COZE_BOT_ID:
+        try:
+            headers = {
+                "Authorization": f"Bearer {COZE_API_KEY}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "bot_id": COZE_BOT_ID,
+                "user": "olbot",
+                "query": question,
+                "conversation_id": "",
+                "stream": False,
+            }
+            res = requests.post(COZE_API_URL, headers=headers, json=payload, timeout=30)
+            res.raise_for_status()
+            data = res.json()
+            messages = data.get("messages") or []
+            answer = ""
+            for msg in messages:
+                if msg.get("type") == "answer":
+                    answer = msg.get("content", "").strip()
+                    if answer:
+                        break
+            if answer:
+                return answer[:500].strip()
+        except Exception as e:
+            logger.warning(f"Coze error: {e}", exc_info=True)
+
     kb_text = kb_text[:2000]
     system_prompt = (
         "Ты бот отдела бронирования. Отвечай кратко, по делу и только на основе базы знаний. "
