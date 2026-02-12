@@ -39,6 +39,7 @@ BITRIX_OLBOT_ID = os.environ.get("BITRIX_OLBOT_ID")
 BITRIX_OLBOT_WEBHOOK_URL = os.environ.get("BITRIX_OLBOT_WEBHOOK_URL")
 BITRIX_KB_URL = os.environ.get("BITRIX_KB_URL")
 BITRIX_KB_PUBLIC_URL = os.environ.get("BITRIX_KB_PUBLIC_URL", "https://apcom.bitrix24.ru/~4YqKJ")
+BITRIX_KB_GOOGLE_DOC_URL = os.environ.get("BITRIX_KB_GOOGLE_DOC_URL")
 KB_CACHE_TTL = int(os.environ.get("KB_CACHE_TTL", "900"))
 BITRIX_EVENT_HANDLER_URL = os.environ.get("BITRIX_EVENT_HANDLER_URL")
 BITRIX_APP_ACCESS_TOKEN = os.environ.get("BITRIX_APP_ACCESS_TOKEN")
@@ -53,7 +54,7 @@ if BITRIX_CLIENT_ID:
 if BITRIX_OLBOT_CLIENT_ID:
     BITRIX_CLIENT_IDS.append(BITRIX_OLBOT_CLIENT_ID)
 LAST_APP_AUTH = {}
-KB_CACHE = {"ts": 0, "items": []}
+KB_CACHE = {"ts": 0, "items": [], "errors": []}
 
 # ID разрешенных чатов Битрикс (для ONIMMESSAGEADD), если используется
 ALLOWED_BX_CHATS = os.environ.get("ALLOWED_BITRIX_CHATS", "").replace(" ", "").split(",")
@@ -164,11 +165,30 @@ def _extract_doc_links(html_text, base_url):
             continue
         url = urljoin(base_url, href)
         items.append({"name": name, "url": url})
+    if not items:
+        download_match = re.search(r'href="([^"]*?/download/[^"]*)"', html_text, flags=re.IGNORECASE)
+        if download_match:
+            url = urljoin(base_url, download_match.group(1))
+            title_match = re.search(r"<title[^>]*>(.*?)</title>", html_text, flags=re.IGNORECASE | re.DOTALL)
+            name = re.sub(r"\s+", " ", _strip_html(title_match.group(1) if title_match else "Документ.docx")).strip()
+            if not name.lower().endswith(".docx"):
+                name = f"{name}.docx"
+            items.append({"name": name, "url": url})
     return items
 
 def _fetch_kb_source(url):
     if not url:
         return ""
+    if "docs.google.com/document" in url:
+        if "/document/d/e/" in url:
+            if "output=txt" not in url:
+                sep = "&" if "?" in url else "?"
+                url = f"{url}{sep}output=txt"
+        else:
+            doc_id_match = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
+            if doc_id_match:
+                doc_id = doc_id_match.group(1)
+                url = f"https://docs.google.com/document/d/{doc_id}/export?format=txt"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -183,14 +203,31 @@ def _load_kb_documents():
     now = time.time()
     if KB_CACHE["items"] and (now - KB_CACHE["ts"] < KB_CACHE_TTL):
         return KB_CACHE["items"]
-    sources = [BITRIX_KB_URL, BITRIX_KB_PUBLIC_URL]
+    sources = [BITRIX_KB_GOOGLE_DOC_URL, BITRIX_KB_URL, BITRIX_KB_PUBLIC_URL]
     items = []
+    KB_CACHE["errors"] = []
     for source in sources:
         if not source:
             continue
         try:
             html_text = _fetch_kb_source(source)
+            if source == BITRIX_KB_GOOGLE_DOC_URL:
+                if "<html" in html_text.lower() or "sign in" in html_text.lower() or "browser version is no longer supported" in html_text.lower():
+                    KB_CACHE["errors"].append("Google Doc требует публикации/доступа по ссылке.")
+                    continue
+                text = re.sub(r"\s+", " ", html_text).strip()
+                if text:
+                    items.append({
+                        "name": "GoogleDoc",
+                        "url": source,
+                        "text": text,
+                        "tokens": _tokenize(text),
+                    })
+                else:
+                    KB_CACHE["errors"].append("Google Doc пуст или недоступен.")
+                continue
             if _is_login_page(html_text):
+                KB_CACHE["errors"].append("Bitrix KB требует авторизации или недоступна.")
                 continue
             links = _extract_doc_links(html_text, source)
             for link in links:
@@ -210,6 +247,7 @@ def _load_kb_documents():
                     logger.warning(f"KB doc fetch failed: {link['url']} {e}", exc_info=True)
         except Exception as e:
             logger.warning(f"KB source fetch failed: {source} {e}", exc_info=True)
+            KB_CACHE["errors"].append(f"KB source fetch failed: {source}")
     KB_CACHE["items"] = items
     KB_CACHE["ts"] = now
     return items
@@ -798,7 +836,10 @@ def bitrix_webhook():
                 if docs:
                     response_text = docs[0]["text"][:500].strip()
                 else:
+                    errors = "; ".join(KB_CACHE.get("errors") or [])
                     response_text = "База знаний не загружена."
+                    if errors:
+                        response_text = f"{response_text} {errors}"
             else:
                 kb_answer = find_kb_answer(message_text)
                 response_text = kb_answer or "Пока не нашел ответ в базе знаний. Уточните вопрос, пожалуйста."
