@@ -32,6 +32,8 @@ BITRIX_TOKEN = os.environ.get("BITRIX_TOKEN")
 BITRIX_BOT_ID = os.environ.get("BITRIX_BOT_ID") # ID вашего бота из Битрикс
 BITRIX_CLIENT_ID = os.environ.get("BITRIX_CLIENT_ID")
 BITRIX_OLBOT_CLIENT_ID = os.environ.get("BITRIX_OLBOT_CLIENT_ID")
+BITRIX_OLBOT_ID = os.environ.get("BITRIX_OLBOT_ID")
+BITRIX_OLBOT_WEBHOOK_URL = os.environ.get("BITRIX_OLBOT_WEBHOOK_URL")
 BITRIX_EVENT_HANDLER_URL = os.environ.get("BITRIX_EVENT_HANDLER_URL")
 BITRIX_APP_ACCESS_TOKEN = os.environ.get("BITRIX_APP_ACCESS_TOKEN")
 BITRIX_PORTAL_URL = os.environ.get("BITRIX_PORTAL_URL")
@@ -458,21 +460,27 @@ def get_bitrix_portal_url():
 # ---------- БИТРИКС24 ----------
 
 def bitrix_send_message(dialog_id, text):
+    return bitrix_send_message_custom(dialog_id, text)
+
+def bitrix_send_message_custom(dialog_id, text, base_url=None, bot_id=None, client_id=None):
     """Отправляет сообщение в чат Битрикс24. DIALOG_ID может быть 'chatN' или ID пользователя."""
-    if not BITRIX_URL:
+    base_url = base_url or BITRIX_URL
+    if not base_url:
         logger.warning("BITRIX_URL не задан, сообщение в Битрикс не отправлено.")
         return
     try:
         # Сначала пытаемся отправить от имени бота (если BOT_ID задан)
-        if BITRIX_BOT_ID:
-            bot_url = f"{BITRIX_URL.rstrip('/')}/imbot.message.add.json"
+        effective_bot_id = bot_id or BITRIX_BOT_ID
+        effective_client_id = client_id or BITRIX_CLIENT_ID
+        if effective_bot_id:
+            bot_url = f"{base_url.rstrip('/')}/imbot.message.add.json"
             bot_payload = {
-                "BOT_ID": BITRIX_BOT_ID,
+                "BOT_ID": effective_bot_id,
                 "DIALOG_ID": dialog_id,
                 "MESSAGE": text,
             }
-            if BITRIX_CLIENT_ID:
-                bot_payload["CLIENT_ID"] = BITRIX_CLIENT_ID
+            if effective_client_id:
+                bot_payload["CLIENT_ID"] = effective_client_id
             logger.info(f"Отправка сообщения (бот) в Битрикс: URL={bot_url}, Payload={bot_payload}")
             bot_response = requests.post(bot_url, json=bot_payload)
             if bot_response.ok:
@@ -487,7 +495,7 @@ def bitrix_send_message(dialog_id, text):
                 logger.error(f"HTTP ошибка imbot.message.add: {bot_response.status_code} - {bot_response.text}")
 
         # Фолбэк: обычная отправка от имени пользователя вебхука
-        send_url = f"{BITRIX_URL.rstrip('/')}/im.message.add.json"
+        send_url = f"{base_url.rstrip('/')}/im.message.add.json"
         payload = {
             "DIALOG_ID": dialog_id,
             "MESSAGE": text,
@@ -675,7 +683,13 @@ def bitrix_webhook():
         ).strip()
 
         if is_olbot_request and message_text:
-            bitrix_send_message(dialog_id_for_response, message_text)
+            bitrix_send_message_custom(
+                dialog_id_for_response,
+                message_text,
+                base_url=BITRIX_OLBOT_WEBHOOK_URL or BITRIX_URL,
+                bot_id=BITRIX_OLBOT_ID or BITRIX_BOT_ID,
+                client_id=BITRIX_OLBOT_CLIENT_ID,
+            )
             return "OK", 200
 
         def is_bot_mentioned(text):
