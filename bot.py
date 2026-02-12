@@ -268,8 +268,28 @@ def find_kb_answer(query):
             best = doc
     if not best or best_score == 0:
         return None
-    snippet = best["text"][:600].strip()
-    return f"{snippet}\n\nИсточник: {best['name']}"
+    snippet = best["text"][:800].strip()
+    return {
+        "name": best["name"],
+        "snippet": snippet,
+        "score": best_score,
+        "query_terms": len(q_tokens),
+    }
+
+def build_kb_response(query):
+    result = find_kb_answer(query)
+    if not result:
+        return None
+    score = result["score"]
+    query_terms = result["query_terms"] or 1
+    ratio = score / query_terms
+    if score < 2 and ratio < 0.2:
+        return None
+    return (
+        "Я нашёл подходящую информацию по вашему вопросу:\n"
+        f"{result['snippet']}\n\n"
+        f"Источник: {result['name']}"
+    )
 
 def bind_events(access_token, portal_url, handler_url, event_names, rest_endpoint=None):
     if not (access_token and handler_url):
@@ -841,8 +861,12 @@ def bitrix_webhook():
                     if errors:
                         response_text = f"{response_text} {errors}"
             else:
-                kb_answer = find_kb_answer(message_text)
-                response_text = kb_answer or "Пока не нашел ответ в базе знаний. Уточните вопрос, пожалуйста."
+                kb_answer = build_kb_response(message_text)
+                response_text = (
+                    kb_answer
+                    or "Пока не нашел ответ в базе знаний. "
+                    "Пожалуйста, переформулируйте вопрос так, чтобы он касался работы отдела бронирования."
+                )
             bitrix_send_message_custom(
                 dialog_id_for_response,
                 response_text,
