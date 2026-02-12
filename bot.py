@@ -793,8 +793,15 @@ def bitrix_webhook():
         ).strip()
 
         if is_olbot_request and message_text:
-            kb_answer = find_kb_answer(message_text)
-            response_text = kb_answer or "Пока не нашел ответ в базе знаний. Уточните вопрос, пожалуйста."
+            if message_text.strip().lower() == "тест":
+                docs = _load_kb_documents()
+                if docs:
+                    response_text = docs[0]["text"][:500].strip()
+                else:
+                    response_text = "База знаний не загружена."
+            else:
+                kb_answer = find_kb_answer(message_text)
+                response_text = kb_answer or "Пока не нашел ответ в базе знаний. Уточните вопрос, пожалуйста."
             bitrix_send_message_custom(
                 dialog_id_for_response,
                 response_text,
