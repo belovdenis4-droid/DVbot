@@ -41,6 +41,10 @@ BITRIX_KB_URL = os.environ.get("BITRIX_KB_URL")
 BITRIX_KB_PUBLIC_URL = os.environ.get("BITRIX_KB_PUBLIC_URL", "https://apcom.bitrix24.ru/~4YqKJ")
 BITRIX_KB_GOOGLE_DOC_URL = os.environ.get("BITRIX_KB_GOOGLE_DOC_URL")
 KB_CACHE_TTL = int(os.environ.get("KB_CACHE_TTL", "900"))
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+DEEPSEEK_API_URL = os.environ.get("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_TEMPERATURE = float(os.environ.get("DEEPSEEK_TEMPERATURE", "0.2"))
 BITRIX_EVENT_HANDLER_URL = os.environ.get("BITRIX_EVENT_HANDLER_URL")
 BITRIX_APP_ACCESS_TOKEN = os.environ.get("BITRIX_APP_ACCESS_TOKEN")
 BITRIX_PORTAL_URL = os.environ.get("BITRIX_PORTAL_URL")
@@ -145,6 +149,17 @@ def _tokenize(text):
     if not text:
         return set()
     return set(_normalize_text(text).split())
+
+def _split_paragraphs(text):
+    if not text:
+        return []
+    parts = re.split(r"\n{2,}|\r{2,}", text)
+    cleaned = []
+    for part in parts:
+        p = re.sub(r"\s+", " ", part).strip()
+        if len(p) >= 40:
+            cleaned.append(p)
+    return cleaned
 
 def _extract_docx_text(content_bytes):
     with zipfile.ZipFile(BytesIO(content_bytes)) as zf:
@@ -268,13 +283,69 @@ def find_kb_answer(query):
             best = doc
     if not best or best_score == 0:
         return None
-    snippet = best["text"][:800].strip()
+    paragraphs = _split_paragraphs(best["text"])
+    if not paragraphs:
+        snippet = best["text"][:800].strip()
+    else:
+        scored = []
+        for p in paragraphs:
+            p_tokens = _tokenize(p)
+            score = len(q_tokens & p_tokens)
+            scored.append((score, p))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        best_para = scored[0][1]
+        extra = scored[1][1] if len(scored) > 1 and scored[1][0] > 0 else ""
+        snippet = best_para if not extra else f"{best_para}\n\n{extra}"
     return {
         "name": best["name"],
         "snippet": snippet,
         "score": best_score,
         "query_terms": len(q_tokens),
     }
+
+def _generate_ai_response(question, kb_text, source_name):
+    if not DEEPSEEK_API_KEY:
+        return None
+    kb_text = kb_text[:2000]
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": DEEPSEEK_MODEL,
+        "temperature": DEEPSEEK_TEMPERATURE,
+        "max_tokens": 300,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Ты бот отдела бронирования. Отвечай кратко, по делу и только на основе базы знаний. "
+                    "Если данных нет, скажи, что уточнишь, и попроси переформулировать вопрос."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Вопрос клиента: {question}\n\n"
+                    f"Фрагмент базы знаний ({source_name}):\n{kb_text}"
+                ),
+            },
+        ],
+    }
+    try:
+        res = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        res.raise_for_status()
+        data = res.json()
+        content = (
+            (data.get("choices") or [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            .strip()
+        )
+        return content or None
+    except Exception as e:
+        logger.warning(f"DeepSeek error: {e}", exc_info=True)
+        return None
 
 def build_kb_response(query):
     result = find_kb_answer(query)
@@ -285,6 +356,9 @@ def build_kb_response(query):
     ratio = score / query_terms
     if score < 2 and ratio < 0.2:
         return None
+    ai_answer = _generate_ai_response(query, result["snippet"], result["name"])
+    if ai_answer:
+        return f"{ai_answer}\n\nИсточник: {result['name']}"
     return (
         "Я нашёл подходящую информацию по вашему вопросу:\n"
         f"{result['snippet']}\n\n"
