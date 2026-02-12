@@ -41,6 +41,10 @@ BITRIX_KB_URL = os.environ.get("BITRIX_KB_URL")
 BITRIX_KB_PUBLIC_URL = os.environ.get("BITRIX_KB_PUBLIC_URL", "https://apcom.bitrix24.ru/~4YqKJ")
 BITRIX_KB_GOOGLE_DOC_URL = os.environ.get("BITRIX_KB_GOOGLE_DOC_URL")
 KB_CACHE_TTL = int(os.environ.get("KB_CACHE_TTL", "900"))
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+GROQ_API_URL = os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_TEMPERATURE = float(os.environ.get("GROQ_TEMPERATURE", "0.2"))
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 DEEPSEEK_API_URL = os.environ.get("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
@@ -304,48 +308,73 @@ def find_kb_answer(query):
     }
 
 def _generate_ai_response(question, kb_text, source_name):
-    if not DEEPSEEK_API_KEY:
-        return None
     kb_text = kb_text[:2000]
-    headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": DEEPSEEK_MODEL,
-        "temperature": DEEPSEEK_TEMPERATURE,
-        "max_tokens": 300,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Ты бот отдела бронирования. Отвечай кратко, по делу и только на основе базы знаний. "
-                    "Если данных нет, скажи, что уточнишь, и попроси переформулировать вопрос."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Вопрос клиента: {question}\n\n"
-                    f"Фрагмент базы знаний ({source_name}):\n{kb_text}"
-                ),
-            },
-        ],
-    }
-    try:
-        res = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-        res.raise_for_status()
-        data = res.json()
-        content = (
-            (data.get("choices") or [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
-        )
-        return content or None
-    except Exception as e:
-        logger.warning(f"DeepSeek error: {e}", exc_info=True)
-        return None
+    system_prompt = (
+        "Ты бот отдела бронирования. Отвечай кратко, по делу и только на основе базы знаний. "
+        "Ответ 2-4 предложения, не более 500 символов. "
+        "Если данных нет, скажи, что уточнишь, и попроси переформулировать вопрос."
+    )
+    user_prompt = (
+        f"Вопрос клиента: {question}\n\n"
+        f"Фрагмент базы знаний ({source_name}):\n{kb_text}"
+    )
+    if GROQ_API_KEY:
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": GROQ_MODEL,
+            "temperature": GROQ_TEMPERATURE,
+            "max_tokens": 300,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        try:
+            res = requests.post(GROQ_API_URL, headers=headers, json=payload, timeout=30)
+            res.raise_for_status()
+            data = res.json()
+            content = (
+                (data.get("choices") or [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+            if content:
+                return content[:500].strip()
+        except Exception as e:
+            logger.warning(f"Groq error: {e}", exc_info=True)
+    if DEEPSEEK_API_KEY:
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": DEEPSEEK_MODEL,
+            "temperature": DEEPSEEK_TEMPERATURE,
+            "max_tokens": 300,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        try:
+            res = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+            res.raise_for_status()
+            data = res.json()
+            content = (
+                (data.get("choices") or [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+            if content:
+                return content[:500].strip()
+        except Exception as e:
+            logger.warning(f"DeepSeek error: {e}", exc_info=True)
+    return None
 
 def build_kb_response(query):
     result = find_kb_answer(query)
@@ -361,7 +390,7 @@ def build_kb_response(query):
         return f"{ai_answer}\n\nИсточник: {result['name']}"
     return (
         "Я нашёл подходящую информацию по вашему вопросу:\n"
-        f"{result['snippet']}\n\n"
+        f"{result['snippet'][:600].strip()}\n\n"
         f"Источник: {result['name']}"
     )
 
