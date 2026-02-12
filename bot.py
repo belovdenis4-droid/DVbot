@@ -511,7 +511,7 @@ def bitrix_send_long_message(dialog_id, text, chunk_size=3000):
     for i in range(0, len(text), chunk_size):
         bitrix_send_message(dialog_id, text[i:i + chunk_size])
 
-@app.route('/bitrix', methods=['GET', 'POST'])
+@app.route('/bitrix', methods=['GET', 'POST', 'HEAD'])
 def bitrix_webhook():
     if request.method in ['GET', 'HEAD']:
         logger.info(f"Bitrix GET /bitrix query={dict(request.args)}")
@@ -980,6 +980,10 @@ def bitrix_webhook():
         return "OK", 200
 
     return "OK", 200 # Возвращаем OK, чтобы Битрикс знал, что сообщение получено
+
+@app.route('/bitrix/olbot', methods=['GET', 'POST', 'HEAD'])
+def bitrix_olbot_webhook():
+    return bitrix_webhook()
 
 # ---------- TELEGRAM ----------
 
