@@ -31,6 +31,7 @@ BITRIX_URL = os.environ.get("BITRIX_WEBHOOK_URL")
 BITRIX_TOKEN = os.environ.get("BITRIX_TOKEN")
 BITRIX_BOT_ID = os.environ.get("BITRIX_BOT_ID") # ID вашего бота из Битрикс
 BITRIX_CLIENT_ID = os.environ.get("BITRIX_CLIENT_ID")
+BITRIX_OLBOT_CLIENT_ID = os.environ.get("BITRIX_OLBOT_CLIENT_ID")
 BITRIX_EVENT_HANDLER_URL = os.environ.get("BITRIX_EVENT_HANDLER_URL")
 BITRIX_APP_ACCESS_TOKEN = os.environ.get("BITRIX_APP_ACCESS_TOKEN")
 BITRIX_PORTAL_URL = os.environ.get("BITRIX_PORTAL_URL")
@@ -41,6 +42,8 @@ BITRIX_OAUTH_URL = os.environ.get("BITRIX_OAUTH_URL", "https://oauth.bitrix.info
 BITRIX_CLIENT_IDS = [c.strip() for c in os.environ.get("BITRIX_CLIENT_IDS", "").split(",") if c.strip()]
 if BITRIX_CLIENT_ID:
     BITRIX_CLIENT_IDS.append(BITRIX_CLIENT_ID)
+if BITRIX_OLBOT_CLIENT_ID:
+    BITRIX_CLIENT_IDS.append(BITRIX_OLBOT_CLIENT_ID)
 LAST_APP_AUTH = {}
 
 # ID разрешенных чатов Битрикс (для ONIMMESSAGEADD), если используется
