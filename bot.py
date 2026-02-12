@@ -634,6 +634,7 @@ def bitrix_webhook():
 
     # 2. Обработка событий: ONIMBOTMESSAGEADD (сообщения боту) и ONIMMESSAGEADD (обычные сообщения в чате)
     event = data.get('event') or json_data.get('event')
+    is_olbot_request = request.path.endswith("/bitrix/olbot")
     if event in ['ONIMBOTMESSAGEADD', 'ONIMMESSAGEADD']:
         chat_id = data.get('data[PARAMS][CHAT_ID]') or (json_data.get('data') or {}).get('PARAMS', {}).get('CHAT_ID') # ID чата или пользователя, куда писать ответ
         user_id_from_bx = data.get('data[PARAMS][FROM_USER_ID]') or (json_data.get('data') or {}).get('PARAMS', {}).get('FROM_USER_ID') # ID отправителя из Битрикс
@@ -669,6 +670,10 @@ def bitrix_webhook():
             or (json_data.get('data') or {}).get('PARAMS', {}).get('MESSAGE')
             or ''
         ).strip()
+
+        if is_olbot_request and message_text:
+            bitrix_send_message(dialog_id_for_response, message_text)
+            return "OK", 200
 
         def is_bot_mentioned(text):
             if not text:
