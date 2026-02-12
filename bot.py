@@ -9,6 +9,9 @@ import requests
 import time
 from pathlib import Path
 import html
+import zipfile
+from io import BytesIO
+from urllib.parse import urljoin
 from flask import Flask, request, jsonify
 from threading import Thread
 from datetime import datetime # НОВОЕ: Добавлен импорт datetime
@@ -34,6 +37,9 @@ BITRIX_CLIENT_ID = os.environ.get("BITRIX_CLIENT_ID")
 BITRIX_OLBOT_CLIENT_ID = os.environ.get("BITRIX_OLBOT_CLIENT_ID")
 BITRIX_OLBOT_ID = os.environ.get("BITRIX_OLBOT_ID")
 BITRIX_OLBOT_WEBHOOK_URL = os.environ.get("BITRIX_OLBOT_WEBHOOK_URL")
+BITRIX_KB_URL = os.environ.get("BITRIX_KB_URL")
+BITRIX_KB_PUBLIC_URL = os.environ.get("BITRIX_KB_PUBLIC_URL", "https://apcom.bitrix24.ru/~4YqKJ")
+KB_CACHE_TTL = int(os.environ.get("KB_CACHE_TTL", "900"))
 BITRIX_EVENT_HANDLER_URL = os.environ.get("BITRIX_EVENT_HANDLER_URL")
 BITRIX_APP_ACCESS_TOKEN = os.environ.get("BITRIX_APP_ACCESS_TOKEN")
 BITRIX_PORTAL_URL = os.environ.get("BITRIX_PORTAL_URL")
@@ -47,6 +53,7 @@ if BITRIX_CLIENT_ID:
 if BITRIX_OLBOT_CLIENT_ID:
     BITRIX_CLIENT_IDS.append(BITRIX_OLBOT_CLIENT_ID)
 LAST_APP_AUTH = {}
+KB_CACHE = {"ts": 0, "items": []}
 
 # ID разрешенных чатов Битрикс (для ONIMMESSAGEADD), если используется
 ALLOWED_BX_CHATS = os.environ.get("ALLOWED_BITRIX_CHATS", "").replace(" ", "").split(",")
@@ -122,6 +129,109 @@ def _mask_token(value):
     if len(value) <= 6:
         return f"{value[0]}...{value[-1]}(len={len(value)})"
     return f"{value[:3]}...{value[-3:]}(len={len(value)})"
+
+def _is_login_page(html_text):
+    if not html_text:
+        return True
+    return "Войти в Битрикс24" in html_text or "auth" in html_text.lower()
+
+def _normalize_text(text):
+    text = text.lower()
+    text = re.sub(r"[^a-zа-я0-9]+", " ", text, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", text).strip()
+
+def _tokenize(text):
+    if not text:
+        return set()
+    return set(_normalize_text(text).split())
+
+def _extract_docx_text(content_bytes):
+    with zipfile.ZipFile(BytesIO(content_bytes)) as zf:
+        if "word/document.xml" not in zf.namelist():
+            return ""
+        xml = zf.read("word/document.xml").decode("utf-8", errors="ignore")
+    texts = re.findall(r"<w:t[^>]*>(.*?)</w:t>", xml)
+    if not texts:
+        return ""
+    return re.sub(r"\s+", " ", html.unescape(" ".join(texts))).strip()
+
+def _extract_doc_links(html_text, base_url):
+    anchors = re.findall(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', html_text, flags=re.IGNORECASE | re.DOTALL)
+    items = []
+    for href, text in anchors:
+        name = re.sub(r"\s+", " ", _strip_html(text)).strip()
+        if not name.lower().endswith(".docx"):
+            continue
+        url = urljoin(base_url, href)
+        items.append({"name": name, "url": url})
+    return items
+
+def _fetch_kb_source(url):
+    if not url:
+        return ""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+    res = requests.get(url, headers=headers, timeout=30)
+    res.raise_for_status()
+    return res.text
+
+def _load_kb_documents():
+    now = time.time()
+    if KB_CACHE["items"] and (now - KB_CACHE["ts"] < KB_CACHE_TTL):
+        return KB_CACHE["items"]
+    sources = [BITRIX_KB_URL, BITRIX_KB_PUBLIC_URL]
+    items = []
+    for source in sources:
+        if not source:
+            continue
+        try:
+            html_text = _fetch_kb_source(source)
+            if _is_login_page(html_text):
+                continue
+            links = _extract_doc_links(html_text, source)
+            for link in links:
+                try:
+                    file_res = requests.get(link["url"], timeout=30)
+                    file_res.raise_for_status()
+                    text = _extract_docx_text(file_res.content)
+                    if not text:
+                        continue
+                    items.append({
+                        "name": link["name"],
+                        "url": link["url"],
+                        "text": text,
+                        "tokens": _tokenize(text),
+                    })
+                except Exception as e:
+                    logger.warning(f"KB doc fetch failed: {link['url']} {e}", exc_info=True)
+        except Exception as e:
+            logger.warning(f"KB source fetch failed: {source} {e}", exc_info=True)
+    KB_CACHE["items"] = items
+    KB_CACHE["ts"] = now
+    return items
+
+def find_kb_answer(query):
+    docs = _load_kb_documents()
+    if not docs:
+        return None
+    q_tokens = _tokenize(query)
+    if not q_tokens:
+        return None
+    best = None
+    best_score = 0
+    for doc in docs:
+        score = len(q_tokens & doc["tokens"])
+        if score > best_score:
+            best_score = score
+            best = doc
+    if not best or best_score == 0:
+        return None
+    snippet = best["text"][:600].strip()
+    return f"{snippet}\n\nИсточник: {best['name']}"
 
 def bind_events(access_token, portal_url, handler_url, event_names, rest_endpoint=None):
     if not (access_token and handler_url):
@@ -683,9 +793,11 @@ def bitrix_webhook():
         ).strip()
 
         if is_olbot_request and message_text:
+            kb_answer = find_kb_answer(message_text)
+            response_text = kb_answer or "Пока не нашел ответ в базе знаний. Уточните вопрос, пожалуйста."
             bitrix_send_message_custom(
                 dialog_id_for_response,
-                message_text,
+                response_text,
                 base_url=BITRIX_OLBOT_WEBHOOK_URL or BITRIX_URL,
                 bot_id=BITRIX_OLBOT_ID or BITRIX_BOT_ID,
                 client_id=BITRIX_OLBOT_CLIENT_ID,
