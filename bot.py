@@ -165,6 +165,73 @@ def _split_paragraphs(text):
             cleaned.append(p)
     return cleaned
 
+def _split_sentences(text):
+    if not text:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    cleaned = []
+    for part in parts:
+        s = re.sub(r"\s+", " ", part).strip()
+        if len(s) >= 20:
+            cleaned.append(s)
+    return cleaned
+
+def _top_sentences_for_query(text, query, limit=5):
+    sentences = _split_sentences(text)
+    if not sentences:
+        return []
+    q_tokens = _tokenize(query)
+    scored = []
+    for s in sentences:
+        s_tokens = _tokenize(s)
+        scored.append((len(q_tokens & s_tokens), s))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top = [s for score, s in scored if score > 0][:limit]
+    return top
+
+def _split_sections(text):
+    if not text:
+        return []
+    lines = [line.strip() for line in text.splitlines()]
+    sections = []
+    current = None
+    heading_re = re.compile(r"^\d+(\.\d+)*\s+.+")
+    for line in lines:
+        if not line:
+            continue
+        if heading_re.match(line):
+            if current:
+                sections.append(current)
+            current = {"title": line, "body": []}
+        elif current:
+            current["body"].append(line)
+    if current:
+        sections.append(current)
+    for section in sections:
+        section["text"] = (section["title"] + "\n" + "\n".join(section["body"])).strip()
+        section["tokens"] = _tokenize(section["text"])
+    return sections
+
+def _get_section_context(text, query):
+    sections = _split_sections(text)
+    if not sections:
+        return None
+    q_tokens = _tokenize(query)
+    scored = []
+    for idx, sec in enumerate(sections):
+        score = len(q_tokens & sec["tokens"])
+        scored.append((score, idx))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    if scored[0][0] == 0:
+        return None
+    idx = scored[0][1]
+    context_parts = [sections[idx]["text"]]
+    if idx > 0:
+        context_parts.insert(0, sections[idx - 1]["text"])
+    if idx + 1 < len(sections):
+        context_parts.append(sections[idx + 1]["text"])
+    return "\n\n".join(context_parts).strip()
+
 def _extract_docx_text(content_bytes):
     with zipfile.ZipFile(BytesIO(content_bytes)) as zf:
         if "word/document.xml" not in zf.namelist():
@@ -311,8 +378,9 @@ def _generate_ai_response(question, kb_text, source_name):
     kb_text = kb_text[:2000]
     system_prompt = (
         "Ты бот отдела бронирования. Отвечай кратко, по делу и только на основе базы знаний. "
-        "Ответ 2-4 предложения, не более 500 символов. "
-        "Если данных нет, скажи, что уточнишь, и попроси переформулировать вопрос."
+        "Ответ 1-3 предложения, до 400 символов. "
+        "Нельзя добавлять факты, которых нет в фрагменте. "
+        "Если ответа нет в фрагменте, скажи, что уточнишь, и попроси переформулировать вопрос."
     )
     user_prompt = (
         f"Вопрос клиента: {question}\n\n"
@@ -385,14 +453,23 @@ def build_kb_response(query):
     ratio = score / query_terms
     if score < 2 and ratio < 0.2:
         return None
-    ai_answer = _generate_ai_response(query, result["snippet"], result["name"])
+    section_context = _get_section_context(result["snippet"], query)
+    if section_context:
+        constrained_text = section_context[:3000].strip()
+    else:
+        top_sentences = _top_sentences_for_query(result["snippet"], query, limit=5)
+        if top_sentences:
+            constrained_text = "\n".join(f"- {s}" for s in top_sentences)
+        else:
+            constrained_text = result["snippet"][:800].strip()
+    ai_answer = _generate_ai_response(query, constrained_text, result["name"])
     if ai_answer:
         return f"{ai_answer}\n\nИсточник: {result['name']}"
-    return (
-        "Я нашёл подходящую информацию по вашему вопросу:\n"
-        f"{result['snippet'][:600].strip()}\n\n"
-        f"Источник: {result['name']}"
-    )
+    if section_context:
+        return f"{constrained_text[:600].strip()}\n\nИсточник: {result['name']}"
+    if 'top_sentences' in locals() and top_sentences:
+        return f"{top_sentences[0]}\n\nИсточник: {result['name']}"
+    return f"{result['snippet'][:600].strip()}\n\nИсточник: {result['name']}"
 
 def bind_events(access_token, portal_url, handler_url, event_names, rest_endpoint=None):
     if not (access_token and handler_url):
