@@ -235,6 +235,28 @@ def _get_section_context(text, query):
         context_parts.append(sections[idx + 1]["text"])
     return "\n\n".join(context_parts).strip()
 
+def _extract_text_from_coze_payload(payload):
+    if payload is None:
+        return ""
+    if isinstance(payload, str):
+        return payload.strip()
+    if isinstance(payload, list):
+        for item in payload:
+            text = _extract_text_from_coze_payload(item)
+            if text:
+                return text
+        return ""
+    if isinstance(payload, dict):
+        for key in ["content", "text", "value"]:
+            val = payload.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        for val in payload.values():
+            text = _extract_text_from_coze_payload(val)
+            if text:
+                return text
+    return ""
+
 def _extract_docx_text(content_bytes):
     with zipfile.ZipFile(BytesIO(content_bytes)) as zf:
         if "word/document.xml" not in zf.namelist():
@@ -398,11 +420,19 @@ def _generate_ai_response(question, kb_text, source_name):
             answer = ""
             for msg in messages:
                 if msg.get("type") == "answer":
-                    answer = msg.get("content", "").strip()
+                    content = msg.get("content", "")
+                    if isinstance(content, str) and content.strip().startswith("{"):
+                        try:
+                            content_json = json.loads(content)
+                            answer = _extract_text_from_coze_payload(content_json)
+                        except Exception:
+                            answer = content
+                    else:
+                        answer = _extract_text_from_coze_payload(content)
                     if answer:
                         break
             if answer:
-                return answer[:500].strip()
+                return {"text": answer[:500].strip(), "from_coze": True}
         except Exception as e:
             logger.warning(f"Coze error: {e}", exc_info=True)
 
@@ -442,7 +472,7 @@ def _generate_ai_response(question, kb_text, source_name):
                 .strip()
             )
             if content:
-                return content[:500].strip()
+                return {"text": content[:500].strip(), "from_coze": False}
         except Exception as e:
             logger.warning(f"Groq error: {e}", exc_info=True)
     if DEEPSEEK_API_KEY:
@@ -470,7 +500,7 @@ def _generate_ai_response(question, kb_text, source_name):
                 .strip()
             )
             if content:
-                return content[:500].strip()
+                return {"text": content[:500].strip(), "from_coze": False}
         except Exception as e:
             logger.warning(f"DeepSeek error: {e}", exc_info=True)
     return None
@@ -494,8 +524,10 @@ def build_kb_response(query):
         else:
             constrained_text = result["snippet"][:800].strip()
     ai_answer = _generate_ai_response(query, constrained_text, result["name"])
-    if ai_answer:
-        return f"{ai_answer}\n\nИсточник: {result['name']}"
+    if ai_answer and ai_answer.get("text"):
+        if ai_answer.get("from_coze"):
+            return ai_answer["text"]
+        return f"{ai_answer['text']}\n\nИсточник: {result['name']}"
     if section_context:
         return f"{constrained_text[:600].strip()}\n\nИсточник: {result['name']}"
     if 'top_sentences' in locals() and top_sentences:
