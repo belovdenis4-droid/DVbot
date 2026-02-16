@@ -1118,7 +1118,7 @@ def bitrix_webhook():
                     response_text = "База знаний не загружена."
                     if errors:
                         response_text = f"{response_text} {errors}"
-            elif message_text.strip().lower() == "dialogs":
+            elif message_text.strip().lower().startswith("dialogs"):
                 handle_dialogs_command(
                     dialog_id_for_response,
                     bitrix_send_message_custom,
@@ -1346,7 +1346,7 @@ def bitrix_webhook():
                     response = f"✅ Система работает. Ошибка получения данных с основного листа: {e}"
                 bitrix_send_message(dialog_id_for_response, response)
 
-            elif message_text.lower() == "dialogs":
+            elif message_text.lower().startswith("dialogs"):
                 handle_dialogs_command(dialog_id_for_response, bitrix_send_message, message_text=message_text)
 
             elif message_text.lower() in ["chat_id", "chatid"]: 
