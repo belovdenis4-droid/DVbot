@@ -1119,7 +1119,13 @@ def bitrix_webhook():
                     if errors:
                         response_text = f"{response_text} {errors}"
             elif message_text.strip().lower() == "dialogs":
-                handle_dialogs_command(dialog_id_for_response, bitrix_send_message_custom)
+                handle_dialogs_command(
+                    dialog_id_for_response,
+                    bitrix_send_message_custom,
+                    base_url=BITRIX_OLBOT_WEBHOOK_URL or BITRIX_URL,
+                    bot_id=BITRIX_OLBOT_ID or BITRIX_BOT_ID,
+                    client_id=BITRIX_OLBOT_CLIENT_ID,
+                )
                 return "OK", 200
             else:
                 kb_answer = build_kb_response(message_text)
