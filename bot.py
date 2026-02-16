@@ -1308,6 +1308,10 @@ def bitrix_webhook():
                     # Получаем URL для скачивания файла
                     disk_file_info_url = f"{files_base_url.rstrip('/')}/disk.file.get.json"
                     disk_file_response = requests.post(disk_file_info_url, json={"id": f_id})
+                    if not disk_file_response.ok and BITRIX_URL and files_base_url != BITRIX_URL:
+                        # Fallback to main webhook if OL bot lacks Disk scope
+                        fallback_url = f"{BITRIX_URL.rstrip('/')}/disk.file.get.json"
+                        disk_file_response = requests.post(fallback_url, json={"id": f_id})
                     if not disk_file_response.ok:
                         logger.info(f"Пропускаю файл ID={f_id}: {disk_file_response.status_code}")
                         continue
