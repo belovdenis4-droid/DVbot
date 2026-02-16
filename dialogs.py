@@ -3,7 +3,7 @@ import io
 import logging
 import os
 import re
-import zipfile
+from openpyxl import Workbook
 from datetime import datetime, timedelta
 
 import requests
@@ -227,95 +227,15 @@ def _send_openlines_session_message(base_url, session_id, text, bot_id=None, cli
         return False
 
 
-def _column_letter(index):
-    result = ""
-    while index > 0:
-        index, remainder = divmod(index - 1, 26)
-        result = chr(65 + remainder) + result
-    return result
-
-
-def _xlsx_escape(value):
-    text = str(value) if value is not None else ""
-    text = (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
-    return text
-
-
 def _build_xlsx_bytes(headers, rows):
-    def cell_xml(col_idx, row_idx, value):
-        ref = f"{_column_letter(col_idx)}{row_idx}"
-        text = _xlsx_escape(value)
-        space_attr = ' xml:space="preserve"' if text.startswith(" ") or text.endswith(" ") else ""
-        return f'<c r="{ref}" t="inlineStr"><is><t{space_attr}>{text}</t></is></c>'
-
-    sheet_rows = []
-    # Header row
-    header_cells = "".join(
-        cell_xml(col_idx + 1, 1, header)
-        for col_idx, header in enumerate(headers)
-    )
-    sheet_rows.append(f'<row r="1">{header_cells}</row>')
-    # Data rows
-    for row_idx, row in enumerate(rows, start=2):
-        row_cells = "".join(
-            cell_xml(col_idx + 1, row_idx, value)
-            for col_idx, value in enumerate(row)
-        )
-        sheet_rows.append(f'<row r="{row_idx}">{row_cells}</row>')
-
-    sheet_xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-        "<sheetData>"
-        + "".join(sheet_rows)
-        + "</sheetData></worksheet>"
-    )
-    workbook_xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
-        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-        '<sheets><sheet name="Dialog" sheetId="1" r:id="rId1"/></sheets>'
-        "</workbook>"
-    )
-    rels_xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        '<Relationship Id="rId1" '
-        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
-        'Target="xl/workbook.xml"/>'
-        "</Relationships>"
-    )
-    workbook_rels_xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        '<Relationship Id="rId1" '
-        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
-        'Target="worksheets/sheet1.xml"/>'
-        "</Relationships>"
-    )
-    content_types_xml = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-        '<Default Extension="xml" ContentType="application/xml"/>'
-        '<Override PartName="/xl/workbook.xml" '
-        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-        '<Override PartName="/xl/worksheets/sheet1.xml" '
-        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-        "</Types>"
-    )
-
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Dialog"
+    sheet.append(headers)
+    for row in rows:
+        sheet.append(row)
     output = io.BytesIO()
-    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("[Content_Types].xml", content_types_xml)
-        zf.writestr("_rels/.rels", rels_xml)
-        zf.writestr("xl/workbook.xml", workbook_xml)
-        zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml)
-        zf.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    workbook.save(output)
     return output.getvalue()
 
 
