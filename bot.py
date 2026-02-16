@@ -98,6 +98,9 @@ except gspread.exceptions.WorksheetNotFound:
 
 app = Flask(__name__)
 
+# Tracks chats awaiting dialogs file upload
+PENDING_DIALOGS_FILE = set()
+
 # Главная страница для Bitrix iframe
 @app.route('/', methods=['GET'])
 def index():
@@ -1309,7 +1312,10 @@ def bitrix_webhook():
                     f_res.raise_for_status()
                     with open(path, "wb") as f: f.write(f_res.content)
 
-                    if message_text.lower().startswith("dialogs") and file_ext in ["csv", "xlsx"]:
+                    if file_ext in ["csv", "xlsx"] and (
+                        message_text.lower().startswith("dialogs")
+                        or dialog_id_for_response in PENDING_DIALOGS_FILE
+                    ):
                         handle_dialogs_file(
                             path,
                             dialog_id_for_response,
@@ -1318,6 +1324,7 @@ def bitrix_webhook():
                             bot_id=BITRIX_OLBOT_ID or BITRIX_BOT_ID,
                             client_id=BITRIX_OLBOT_CLIENT_ID,
                         )
+                        PENDING_DIALOGS_FILE.discard(dialog_id_for_response)
                     elif file_ext == "pdf":
                         md = get_text_llama_parse(path)
                         count = process_and_save(md)
@@ -1355,6 +1362,12 @@ def bitrix_webhook():
                     response = f"✅ Система работает. Ошибка получения данных с основного листа: {e}"
                 bitrix_send_message(dialog_id_for_response, response)
 
+            elif message_text.lower().strip() == "dialogs":
+                PENDING_DIALOGS_FILE.add(dialog_id_for_response)
+                bitrix_send_message(
+                    dialog_id_for_response,
+                    "Вышлите файл диалогов (CSV/XLSX) с колонкой ID.",
+                )
             elif message_text.lower().startswith("dialogs"):
                 handle_dialogs_command(dialog_id_for_response, bitrix_send_message, message_text=message_text)
 
