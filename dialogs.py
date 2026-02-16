@@ -351,6 +351,11 @@ def _is_system_line(author_id, text):
     return False
 
 
+def _is_operator_marker(text):
+    lowered = (text or "").lower()
+    return "отправлено из мессенджера" in lowered or "отправлено роботом" in lowered
+
+
 def _get_user_name(base_url, user_id):
     if not base_url or not user_id or not str(user_id).isdigit():
         return None
@@ -618,14 +623,17 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                 if author_key not in user_name_cache:
                     user_name_cache[author_key] = _get_user_name(used_base_url, author_key)
                 author_name = user_name_cache.get(author_key)
-            if guest_user_id is not None and str(guest_user_id) == author_key:
+            is_guest = guest_user_id is not None and str(guest_user_id) == author_key
+            if _is_operator_marker(cleaned_text):
+                speaker = "Оператор"
+                is_incoming = False
+            elif is_guest:
                 speaker = guest_label
+                is_incoming = True
             else:
-                speaker = author_name or guest_label
+                speaker = author_name or "Оператор"
+                is_incoming = False
             lines.append(f"{speaker}: {cleaned_text}")
-            is_incoming = (guest_user_id is not None and str(guest_user_id) == author_key) or (
-                guest_user_id is None and speaker == guest_label
-            )
             incoming_flag = "✓" if is_incoming else ""
             outgoing_flag = "✓" if not is_incoming else ""
             rows.append([session_id, msg_date, incoming_flag, outgoing_flag, speaker, cleaned_text])
