@@ -626,17 +626,15 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
             is_guest = guest_user_id is not None and str(guest_user_id) == author_key
             if _is_operator_marker(cleaned_text):
                 speaker = "Оператор"
-                is_incoming = False
+                direction = "Исх"
             elif is_guest:
                 speaker = guest_label
-                is_incoming = True
+                direction = "Вх"
             else:
                 speaker = author_name or "Оператор"
-                is_incoming = False
+                direction = "Исх"
             lines.append(f"{speaker}: {cleaned_text}")
-            incoming_flag = "✓" if is_incoming else ""
-            outgoing_flag = "✓" if not is_incoming else ""
-            rows.append([session_id, msg_date, incoming_flag, outgoing_flag, speaker, cleaned_text])
+            rows.append([session_id, msg_date, direction, speaker, cleaned_text])
         if not lines:
             _send(send_message, dialog_id, "В истории нет текстовых сообщений.", **kwargs)
             return
@@ -648,7 +646,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
 
         if folder_id and chat_id and used_base_url:
             file_name = f"dialogs_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            headers = ["dialog_id", "Дата", "Входящее", "Исходящее", "Имя", "сообщение"]
+            headers = ["dialog_id", "Дата", "Направление", "Имя", "сообщение"]
             content_bytes = _build_xlsx_bytes(headers, rows)
             disk_id = _upload_file_to_bitrix_disk(
                 used_base_url,
