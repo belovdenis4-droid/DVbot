@@ -1,6 +1,5 @@
 import base64
 import io
-import json
 import logging
 import os
 import re
@@ -647,23 +646,10 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                     guest_label_norm
                     and (guest_label_norm in speaker_norm or speaker_norm in guest_label_norm)
                 )
-                direction = "Вх" if is_guest_by_id or is_guest_by_name else "Исх"
+                is_ours = author_key in user_map
+                direction = "Вх" if (is_guest_by_id or is_guest_by_name or not is_ours) else "Исх"
             lines.append(f"{speaker}: {cleaned_text}")
-            raw_message = json.dumps(msg, ensure_ascii=False, sort_keys=True)
-            rows.append(
-                [
-                    session_id,
-                    msg_date,
-                    direction,
-                    speaker,
-                    cleaned_text,
-                    "",
-                    "",
-                    "",
-                    "",
-                    raw_message,
-                ]
-            )
+            rows.append([session_id, msg_date, direction, speaker, cleaned_text])
         if not lines:
             _send(send_message, dialog_id, "В истории нет текстовых сообщений.", **kwargs)
             return
@@ -675,18 +661,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
 
         if folder_id and chat_id and used_base_url:
             file_name = f"dialogs_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            headers = [
-                "dialog_id",
-                "Дата",
-                "Направление",
-                "Имя",
-                "сообщение",
-                "reserved_6",
-                "reserved_7",
-                "reserved_8",
-                "reserved_9",
-                "raw_message",
-            ]
+            headers = ["dialog_id", "Дата", "Направление", "Имя", "сообщение"]
             content_bytes = _build_xlsx_bytes(headers, rows)
             disk_id = _upload_file_to_bitrix_disk(
                 used_base_url,
