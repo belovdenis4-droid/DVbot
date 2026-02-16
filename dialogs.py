@@ -3,8 +3,8 @@ import csv
 import io
 import logging
 import os
+import re
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import requests
 
@@ -131,6 +131,24 @@ def _get_dialog_id_for_session(base_url, session_id):
         return None
 
 
+def _get_dialog_info_for_session(base_url, session_id):
+    try:
+        res = requests.post(
+            f"{base_url.rstrip('/')}/imopenlines.dialog.get.json",
+            json={"SESSION_ID": session_id},
+            timeout=30,
+        )
+        if res.status_code == 404:
+            return None
+        res.raise_for_status()
+        data = res.json()
+        if "result" not in data:
+            return None
+        return data.get("result") or {}
+    except Exception:
+        return None
+
+
 def _extract_chat_id(value):
     if value is None:
         return None
@@ -207,6 +225,61 @@ def _send_openlines_session_message(base_url, session_id, text, bot_id=None, cli
     except Exception as exc:
         logger.warning("Openlines send failed: %s", exc)
         return False
+
+
+def _strip_bbcode(text):
+    if not text:
+        return ""
+    # Remove common bbcode tags and separators
+    text = re.sub(r"\[/?(b|i|u|s)\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[URL[^\]]*\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[/URL\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[icon[^\]]*\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"-{3,}", "", text)
+    return text.strip()
+
+
+def _is_system_line(author_id, text):
+    if author_id in {"?", None, ""}:
+        return True
+    lowered = (text or "").lower()
+    system_markers = [
+        "начат новый диалог",
+        "сделка прикреплена",
+        "заказ прикреплен",
+        "контактная информация сохранена",
+        "обращение направлено",
+        "переадресовал диалог",
+        "изменил название чата",
+    ]
+    if any(marker in lowered for marker in system_markers):
+        return True
+    if "[user=" in lowered:
+        return True
+    return False
+
+
+def _get_user_name(base_url, user_id):
+    if not base_url or not user_id or not str(user_id).isdigit():
+        return None
+    try:
+        res = requests.get(
+            f"{base_url.rstrip('/')}/user.get.json",
+            params={"ID": user_id},
+            timeout=20,
+        )
+        if res.status_code == 404:
+            return None
+        res.raise_for_status()
+        data = res.json()
+        result = data.get("result") or []
+        if isinstance(result, list) and result:
+            user = result[0]
+            name = " ".join(filter(None, [user.get("NAME"), user.get("LAST_NAME")])).strip()
+            return name or None
+        return None
+    except Exception:
+        return None
 
 
 def _send_dialogs_list(dialog_id, send_message, base_url, **kwargs):
@@ -342,8 +415,31 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
 
         response_dialog_id = dialog_id
         dialog_id_for_history = None
+        dialog_info = None
+        guest_label = "Гость"
         if used_base_url:
-            dialog_id_for_history = _get_dialog_id_for_session(used_base_url, session_id)
+            dialog_info = _get_dialog_info_for_session(used_base_url, session_id)
+            if dialog_info:
+                dialog_id_for_history = (
+                    dialog_info.get("DIALOG_ID")
+                    or dialog_info.get("dialog_id")
+                    or dialog_info.get("CHAT_ID")
+                    or dialog_info.get("chat_id")
+                )
+                guest_name = " ".join(
+                    filter(
+                        None,
+                        [
+                            dialog_info.get("USER_NAME"),
+                            dialog_info.get("USER_LAST_NAME"),
+                            dialog_info.get("USER_SECOND_NAME"),
+                        ],
+                    )
+                ).strip()
+                if guest_name:
+                    guest_label = guest_name
+            if not dialog_id_for_history:
+                dialog_id_for_history = _get_dialog_id_for_session(used_base_url, session_id)
             normalized = _normalize_dialog_id(dialog_id_for_history)
             if normalized:
                 response_dialog_id = normalized
@@ -370,6 +466,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                 return
         lines = []
         rows = []
+        user_name_cache = {}
         for msg in messages:
             text = (
                 msg.get("MESSAGE")
@@ -381,6 +478,8 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
             if not text:
                 continue
             author = msg.get("AUTHOR_ID") or msg.get("author_id") or "?"
+            if _is_system_line(author, text):
+                continue
             msg_date = (
                 msg.get("DATE")
                 or msg.get("date")
@@ -388,8 +487,17 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                 or msg.get("date_create")
                 or ""
             )
-            lines.append(f"{author}: {text}")
-            rows.append([author, msg_date, text])
+            cleaned_text = _strip_bbcode(text)
+            if not cleaned_text:
+                continue
+            author_name = None
+            if str(author).isdigit():
+                if author not in user_name_cache:
+                    user_name_cache[author] = _get_user_name(used_base_url, author)
+                author_name = user_name_cache.get(author)
+            speaker = author_name or guest_label
+            lines.append(f"{speaker}: {cleaned_text}")
+            rows.append([speaker, msg_date, cleaned_text])
         if not lines:
             _send(send_message, dialog_id, "В истории нет текстовых сообщений.", **kwargs)
             return
@@ -403,7 +511,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
             file_name = f"dialogs_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
             csv_buffer = io.StringIO()
             writer = csv.writer(csv_buffer)
-            writer.writerow(["author_id", "date", "text"])
+            writer.writerow(["speaker", "date", "text"])
             writer.writerows(rows)
             content_bytes = csv_buffer.getvalue().encode("utf-8")
             disk_id = _upload_file_to_bitrix_disk(used_base_url, folder_id, file_name, content_bytes)
