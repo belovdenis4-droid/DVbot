@@ -15,7 +15,7 @@ from urllib.parse import urljoin
 from flask import Flask, request, jsonify
 from threading import Thread
 from datetime import datetime # НОВОЕ: Добавлен импорт datetime
-from dialogs import handle_dialogs_command
+from dialogs import handle_dialogs_command, handle_dialogs_file
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -1309,7 +1309,16 @@ def bitrix_webhook():
                     f_res.raise_for_status()
                     with open(path, "wb") as f: f.write(f_res.content)
 
-                    if file_ext == "pdf":
+                    if message_text.lower().startswith("dialogs") and file_ext in ["csv", "xlsx"]:
+                        handle_dialogs_file(
+                            path,
+                            dialog_id_for_response,
+                            bitrix_send_message,
+                            base_url=BITRIX_OLBOT_WEBHOOK_URL or BITRIX_URL,
+                            bot_id=BITRIX_OLBOT_ID or BITRIX_BOT_ID,
+                            client_id=BITRIX_OLBOT_CLIENT_ID,
+                        )
+                    elif file_ext == "pdf":
                         md = get_text_llama_parse(path)
                         count = process_and_save(md)
                         bitrix_send_message(dialog_id_for_response, f"✅ Битрикс: добавлено строк: {count} на основной лист.")
