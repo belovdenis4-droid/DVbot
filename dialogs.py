@@ -149,7 +149,9 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
 
     parts = text.split()
     if len(parts) == 1 or parts[1].lower() in {"list", "recent"}:
-        _send_dialogs_list(dialog_id, send_message, _get_base_url(**kwargs), **kwargs)
+        base_url = _get_base_url(**kwargs)
+        kwargs = {k: v for k, v in kwargs.items() if k != "base_url"}
+        _send_dialogs_list(dialog_id, send_message, base_url, **kwargs)
         return
 
     if parts[1].lower() in {"id", "current"}:
