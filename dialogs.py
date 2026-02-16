@@ -1,4 +1,7 @@
 import base64
+import csv
+import io
+import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -6,6 +9,7 @@ from pathlib import Path
 import requests
 
 OPENLINES_WEBHOOK_URL = os.environ.get("BITRIX_OPENLINES_WEBHOOK_URL") or os.environ.get("BITRIX_OLBOT_WEBHOOK_URL") or os.environ.get("BITRIX_WEBHOOK_URL")
+logger = logging.getLogger(__name__)
 
 
 def _send(send_message, dialog_id, text, **kwargs):
@@ -156,7 +160,8 @@ def _upload_file_to_bitrix_disk(base_url, folder_id, file_name, content_bytes):
         result = data.get("result") or {}
         disk_id = result.get("ID") or result.get("id") or result.get("DISK_ID")
         return str(disk_id) if disk_id else None
-    except Exception:
+    except Exception as exc:
+        logger.warning("Disk upload failed: %s", exc)
         return None
 
 
@@ -174,7 +179,8 @@ def _commit_file_to_chat(base_url, chat_id, disk_id, message=None):
         res.raise_for_status()
         data = res.json()
         return data.get("result") is True
-    except Exception:
+    except Exception as exc:
+        logger.warning("Disk commit failed: %s", exc)
         return False
 
 
@@ -198,7 +204,8 @@ def _send_openlines_session_message(base_url, session_id, text, bot_id=None, cli
         if "result" in data:
             return True
         return False
-    except Exception:
+    except Exception as exc:
+        logger.warning("Openlines send failed: %s", exc)
         return False
 
 
@@ -362,6 +369,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                 _send(send_message, dialog_id, "История диалога пуста.", **kwargs)
                 return
         lines = []
+        rows = []
         for msg in messages:
             text = (
                 msg.get("MESSAGE")
@@ -373,7 +381,15 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
             if not text:
                 continue
             author = msg.get("AUTHOR_ID") or msg.get("author_id") or "?"
+            msg_date = (
+                msg.get("DATE")
+                or msg.get("date")
+                or msg.get("DATE_CREATE")
+                or msg.get("date_create")
+                or ""
+            )
             lines.append(f"{author}: {text}")
+            rows.append([author, msg_date, text])
         if not lines:
             _send(send_message, dialog_id, "В истории нет текстовых сообщений.", **kwargs)
             return
@@ -384,21 +400,15 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
         chat_id = _extract_chat_id(response_dialog_id)
 
         if folder_id and chat_id and used_base_url:
-            file_name = f"dialogs_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.txt"
-            Path("downloads").mkdir(exist_ok=True)
-            file_path = Path("downloads") / file_name
-            file_path.write_text(output, encoding="utf-8")
-            disk_id = _upload_file_to_bitrix_disk(used_base_url, folder_id, file_name, file_path.read_bytes())
+            file_name = f"dialogs_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer)
+            writer.writerow(["author_id", "date", "text"])
+            writer.writerows(rows)
+            content_bytes = csv_buffer.getvalue().encode("utf-8")
+            disk_id = _upload_file_to_bitrix_disk(used_base_url, folder_id, file_name, content_bytes)
             if disk_id and _commit_file_to_chat(used_base_url, chat_id, disk_id, message="История диалога"):
-                try:
-                    file_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
                 return
-            try:
-                file_path.unlink(missing_ok=True)
-            except Exception:
-                pass
 
         for chunk in _chunk_text(output):
             sent = _send_openlines_session_message(
