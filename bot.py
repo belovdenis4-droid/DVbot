@@ -1122,6 +1122,7 @@ def bitrix_webhook():
                 handle_dialogs_command(
                     dialog_id_for_response,
                     bitrix_send_message_custom,
+                    message_text=message_text,
                     base_url=BITRIX_OLBOT_WEBHOOK_URL or BITRIX_URL,
                     bot_id=BITRIX_OLBOT_ID or BITRIX_BOT_ID,
                     client_id=BITRIX_OLBOT_CLIENT_ID,
@@ -1346,7 +1347,7 @@ def bitrix_webhook():
                 bitrix_send_message(dialog_id_for_response, response)
 
             elif message_text.lower() == "dialogs":
-                handle_dialogs_command(dialog_id_for_response, bitrix_send_message)
+                handle_dialogs_command(dialog_id_for_response, bitrix_send_message, message_text=message_text)
 
             elif message_text.lower() in ["chat_id", "chatid"]: 
                 bitrix_send_message(
