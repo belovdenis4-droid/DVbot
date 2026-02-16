@@ -1121,6 +1121,16 @@ def bitrix_webhook():
                     response_text = "База знаний не загружена."
                     if errors:
                         response_text = f"{response_text} {errors}"
+            elif message_text.strip().lower() == "dialogs":
+                PENDING_DIALOGS_FILE.add(dialog_id_for_response)
+                bitrix_send_message_custom(
+                    dialog_id_for_response,
+                    "Вышлите файл диалогов (CSV/XLSX) с колонкой ID.",
+                    base_url=BITRIX_OLBOT_WEBHOOK_URL or BITRIX_URL,
+                    bot_id=BITRIX_OLBOT_ID or BITRIX_BOT_ID,
+                    client_id=BITRIX_OLBOT_CLIENT_ID,
+                )
+                return "OK", 200
             elif message_text.strip().lower().startswith("dialogs"):
                 handle_dialogs_command(
                     dialog_id_for_response,
