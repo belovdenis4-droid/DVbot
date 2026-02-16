@@ -21,6 +21,14 @@ def _get_base_url(**kwargs):
     return kwargs.get("base_url") or OPENLINES_WEBHOOK_URL
 
 
+def _iter_base_urls(primary_url):
+    seen = set()
+    for url in [primary_url, OPENLINES_WEBHOOK_URL, os.environ.get("BITRIX_WEBHOOK_URL")]:
+        if url and url not in seen:
+            seen.add(url)
+            yield url
+
+
 def _extract_sessions(data):
     result = data.get("result")
     next_start = data.get("next")
@@ -78,54 +86,64 @@ def _extract_client_label(item):
 
 
 def _send_dialogs_list(dialog_id, send_message, base_url, **kwargs):
-    if not base_url:
-        _send(send_message, dialog_id, "Не задан BITRIX_OPENLINES_WEBHOOK_URL.", **kwargs)
-        return
-
     date_from = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
-    url = f"{base_url.rstrip('/')}/imopenlines.session.list.json"
     start = 0
     items_by_id = {}
+    last_error = None
     try:
-        while True:
-            payload = {
-                "FILTER": {">=DATE_CREATE": date_from},
-                "SELECT": [
-                    "ID",
-                    "DIALOG_ID",
-                    "DATE_CREATE",
-                    "USER_ID",
-                    "USER_NAME",
-                    "USER_LAST_NAME",
-                    "USER_SECOND_NAME",
-                    "USER_LOGIN",
-                    "USER_EMAIL",
-                    "CHAT_ID",
-                ],
-                "ORDER": {"ID": "DESC"},
-                "start": start,
-            }
-            res = requests.post(url, json=payload, timeout=30)
-            res.raise_for_status()
-            data = res.json()
-            if "result" not in data:
-                err = data.get("error_description") or data.get("error") or "Unknown error"
-                _send(send_message, dialog_id, f"Ошибка Bitrix: {err}", **kwargs)
-                return
-            items, next_start = _extract_sessions(data)
-            for item in items:
-                entry = item or {}
-                session_id = _extract_session_id(entry)
-                if session_id and session_id not in items_by_id:
-                    items_by_id[session_id] = {
-                        "date": _extract_date(entry),
-                        "client": _extract_client_label(entry),
-                    }
-            if next_start is None:
+        for url_base in _iter_base_urls(base_url):
+            url = f"{url_base.rstrip('/')}/imopenlines.session.list.json"
+            start = 0
+            items_by_id = {}
+            while True:
+                payload = {
+                    "FILTER": {">=DATE_CREATE": date_from},
+                    "SELECT": [
+                        "ID",
+                        "DIALOG_ID",
+                        "DATE_CREATE",
+                        "USER_ID",
+                        "USER_NAME",
+                        "USER_LAST_NAME",
+                        "USER_SECOND_NAME",
+                        "USER_LOGIN",
+                        "USER_EMAIL",
+                        "CHAT_ID",
+                    ],
+                    "ORDER": {"ID": "DESC"},
+                    "start": start,
+                }
+                res = requests.post(url, json=payload, timeout=30)
+                if res.status_code == 404:
+                    last_error = f"404 Not Found for url: {url}"
+                    items_by_id = {}
+                    break
+                res.raise_for_status()
+                data = res.json()
+                if "result" not in data:
+                    err = data.get("error_description") or data.get("error") or "Unknown error"
+                    _send(send_message, dialog_id, f"Ошибка Bitrix: {err}", **kwargs)
+                    return
+                items, next_start = _extract_sessions(data)
+                for item in items:
+                    entry = item or {}
+                    session_id = _extract_session_id(entry)
+                    if session_id and session_id not in items_by_id:
+                        items_by_id[session_id] = {
+                            "date": _extract_date(entry),
+                            "client": _extract_client_label(entry),
+                        }
+                if next_start is None:
+                    break
+                start = next_start
+            if items_by_id:
                 break
-            start = next_start
     except Exception as e:
         _send(send_message, dialog_id, f"Ошибка получения списка: {e}", **kwargs)
+        return
+
+    if not items_by_id and last_error:
+        _send(send_message, dialog_id, f"Ошибка получения списка: {last_error}", **kwargs)
         return
 
     if not items_by_id:
