@@ -15,7 +15,7 @@ from urllib.parse import urljoin
 from flask import Flask, request, jsonify
 from threading import Thread
 from datetime import datetime # НОВОЕ: Добавлен импорт datetime
-from dialogs import handle_dialogs_command, handle_dialogs_file
+from dialogs import handle_dialogs_command, handle_dialogs_file, handle_dialogs_ids
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -1131,6 +1131,17 @@ def bitrix_webhook():
                     client_id=BITRIX_OLBOT_CLIENT_ID,
                 )
                 return "OK", 200
+            elif dialog_id_for_response in PENDING_DIALOGS_FILE and message_text.strip():
+                handle_dialogs_ids(
+                    message_text,
+                    dialog_id_for_response,
+                    bitrix_send_message_custom,
+                    base_url=BITRIX_OLBOT_WEBHOOK_URL or BITRIX_URL,
+                    bot_id=BITRIX_OLBOT_ID or BITRIX_BOT_ID,
+                    client_id=BITRIX_OLBOT_CLIENT_ID,
+                )
+                PENDING_DIALOGS_FILE.discard(dialog_id_for_response)
+                return "OK", 200
             elif message_text.strip().lower().startswith("dialogs"):
                 handle_dialogs_command(
                     dialog_id_for_response,
@@ -1300,11 +1311,52 @@ def bitrix_webhook():
                 )
                 return "OK", 200
 
-            valid_file_ids = [f_id for f_id in files_data.keys() if str(f_id).isdigit()]
+            valid_file_ids = [
+                f_id
+                for f_id in files_data.keys()
+                if str(f_id).isdigit() and int(str(f_id)) > 0
+            ]
             if not valid_file_ids:
                 logger.info("Нет корректных числовых ID файлов в событии.")
             elif not dialogs_pending:
                 bitrix_send_message(dialog_id_for_response, "⏳ Начинаю распознавание файла...")
+
+            if dialogs_pending and files_data:
+                # Try direct download URL from payload first
+                file_candidates = files_data.values() if isinstance(files_data, dict) else files_data
+                for meta in file_candidates:
+                    if not isinstance(meta, dict):
+                        continue
+                    direct_url = None
+                    for key in ["DOWNLOAD_URL", "downloadUrl", "DOWNLOAD", "LINK", "URL", "url"]:
+                        value = meta.get(key)
+                        if value:
+                            direct_url = value
+                            break
+                    if not direct_url:
+                        continue
+                    file_name = meta.get("NAME") or meta.get("name") or "dialogs.xlsx"
+                    file_ext = file_name.lower().rsplit(".", 1)[-1] if "." in file_name else ""
+                    if file_ext not in ["csv", "xlsx"]:
+                        continue
+                    path = f"downloads/{file_name}"
+                    Path("downloads").mkdir(exist_ok=True)
+                    f_res = requests.get(direct_url)
+                    f_res.raise_for_status()
+                    with open(path, "wb") as f:
+                        f.write(f_res.content)
+                    handle_dialogs_file(
+                        path,
+                        dialog_id_for_response,
+                        bitrix_send_message,
+                        base_url=files_base_url,
+                        bot_id=BITRIX_OLBOT_ID or BITRIX_BOT_ID,
+                        client_id=BITRIX_OLBOT_CLIENT_ID,
+                    )
+                    PENDING_DIALOGS_FILE.discard(dialog_id_for_response)
+                    if os.path.exists(path):
+                        os.remove(path)
+                    return "OK", 200
 
             for f_id in valid_file_ids:
                 try:
@@ -1408,6 +1460,16 @@ def bitrix_webhook():
                     dialog_id_for_response,
                     "Вышлите файл диалогов (CSV/XLSX) с колонкой ID.",
                 )
+            elif dialog_id_for_response in PENDING_DIALOGS_FILE and message_text.strip():
+                handle_dialogs_ids(
+                    message_text,
+                    dialog_id_for_response,
+                    bitrix_send_message,
+                    base_url=BITRIX_OLBOT_WEBHOOK_URL or BITRIX_URL,
+                    bot_id=BITRIX_OLBOT_ID or BITRIX_BOT_ID,
+                    client_id=BITRIX_OLBOT_CLIENT_ID,
+                )
+                PENDING_DIALOGS_FILE.discard(dialog_id_for_response)
             elif message_text.lower().startswith("dialogs"):
                 handle_dialogs_command(dialog_id_for_response, bitrix_send_message, message_text=message_text)
 

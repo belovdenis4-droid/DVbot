@@ -383,6 +383,25 @@ def _extract_ids_from_rows(rows):
     return ids
 
 
+def _extract_ids_from_text(text):
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if not lines:
+        return []
+    if _normalize_name(lines[0]) in {"№", "no", "number", "номер"}:
+        lines = lines[1:]
+    ids = []
+    seen = set()
+    for line in lines:
+        match = re.search(r"\d+", line)
+        if not match:
+            continue
+        session_id = match.group(0)
+        if session_id not in seen:
+            seen.add(session_id)
+            ids.append(session_id)
+    return ids
+
+
 def _parse_ids_from_file(file_path):
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".csv":
@@ -727,6 +746,48 @@ def handle_dialogs_file(file_path, dialog_id, send_message, **kwargs):
 
     if not all_rows:
         _send(send_message, dialog_id, "Не удалось собрать историю по ID из файла.", **kwargs)
+        return
+
+    folder_id = os.environ.get("BITRIX_DIALOGS_FOLDER_ID")
+    chat_id = _extract_chat_id(dialog_id)
+    if not folder_id or not chat_id or not used_base_url:
+        _send(send_message, dialog_id, "Не удалось отправить файл (нет Disk-параметров).", **kwargs)
+        return
+
+    file_name = f"dialogs_batch_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    headers = ["dialog_id", "Дата", "Направление", "Имя", "сообщение"]
+    content_bytes = _build_xlsx_bytes(headers, all_rows)
+    disk_id = _upload_file_to_bitrix_disk(used_base_url, folder_id, file_name, content_bytes)
+    if disk_id and _commit_file_to_chat(used_base_url, chat_id, disk_id, message="История диалогов"):
+        _send(send_message, dialog_id, "Файл диалогов создан.", **kwargs)
+    else:
+        _send(send_message, dialog_id, "Не удалось отправить файл диалогов.", **kwargs)
+    if errors:
+        _send(send_message, dialog_id, "Ошибки:\n" + "\n".join(errors[:20]), **kwargs)
+
+
+def handle_dialogs_ids(message_text, dialog_id, send_message, **kwargs):
+    base_url = _get_base_url(**kwargs)
+    session_ids = _extract_ids_from_text(message_text)
+    if not session_ids:
+        _send(send_message, dialog_id, "Не удалось найти ID в тексте.", **kwargs)
+        return
+
+    operator_names = _get_operator_names()
+    all_rows = []
+    errors = []
+    used_base_url = None
+    for session_id in session_ids:
+        rows, row_base_url, error = _collect_dialog_rows_for_session(session_id, base_url, operator_names)
+        if row_base_url and not used_base_url:
+            used_base_url = row_base_url
+        if error:
+            errors.append(f"{session_id}: {error}")
+            continue
+        all_rows.extend(rows)
+
+    if not all_rows:
+        _send(send_message, dialog_id, "Не удалось собрать историю по ID.", **kwargs)
         return
 
     folder_id = os.environ.get("BITRIX_DIALOGS_FOLDER_ID")
