@@ -15,6 +15,7 @@ from urllib.parse import urljoin
 from flask import Flask, request, jsonify
 from threading import Thread
 from datetime import datetime # НОВОЕ: Добавлен импорт datetime
+from dialogs import handle_dialogs_command
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -1118,7 +1119,8 @@ def bitrix_webhook():
                     if errors:
                         response_text = f"{response_text} {errors}"
             elif message_text.strip().lower() == "dialogs":
-                response_text = "ready"
+                handle_dialogs_command(dialog_id_for_response, bitrix_send_message_custom)
+                return "OK", 200
             else:
                 kb_answer = build_kb_response(message_text)
                 response_text = (
@@ -1338,7 +1340,7 @@ def bitrix_webhook():
                 bitrix_send_message(dialog_id_for_response, response)
 
             elif message_text.lower() == "dialogs":
-                bitrix_send_message(dialog_id_for_response, "ready")
+                handle_dialogs_command(dialog_id_for_response, bitrix_send_message)
 
             elif message_text.lower() in ["chat_id", "chatid"]: 
                 bitrix_send_message(
