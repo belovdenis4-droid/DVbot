@@ -543,16 +543,16 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                 if author_key not in user_name_cache:
                     user_name_cache[author_key] = _get_user_name(used_base_url, author_key)
                 author_name = user_name_cache.get(author_key)
-            is_guest = guest_user_id is not None and str(guest_user_id) == author_key
+            is_guest_by_id = guest_user_id is not None and str(guest_user_id) == author_key
             if _is_operator_marker(cleaned_text):
                 speaker = "Оператор"
                 direction = "Исх"
-            elif is_guest:
-                speaker = guest_label
-                direction = "Вх"
             else:
-                speaker = author_name or "Оператор"
-                direction = "Исх"
+                if is_guest_by_id:
+                    speaker = guest_label
+                else:
+                    speaker = author_name or guest_label
+                direction = "Вх" if speaker == guest_label else "Исх"
             lines.append(f"{speaker}: {cleaned_text}")
             rows.append([session_id, msg_date, direction, speaker, cleaned_text])
         if not lines:
