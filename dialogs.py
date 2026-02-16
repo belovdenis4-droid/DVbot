@@ -354,6 +354,26 @@ def _is_system_line(author_id, text):
 def _get_user_name(base_url, user_id):
     if not base_url or not user_id or not str(user_id).isdigit():
         return None
+
+
+def _extract_user_map(result):
+    user_map = {}
+    users = result.get("USERS") or result.get("users") or []
+    if isinstance(users, dict):
+        users = users.values()
+    if isinstance(users, list):
+        for user in users:
+            if not isinstance(user, dict):
+                continue
+            user_id = user.get("id") or user.get("ID")
+            if user_id is None:
+                continue
+            name = user.get("name") or user.get("NAME")
+            if not name:
+                name = " ".join(filter(None, [user.get("NAME"), user.get("LAST_NAME")])).strip()
+            if name:
+                user_map[str(user_id)] = name
+    return user_map
     try:
         res = requests.get(
             f"{base_url.rstrip('/')}/user.get.json",
@@ -509,6 +529,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
         dialog_id_for_history = None
         dialog_info = None
         guest_label = "Гость"
+        guest_user_id = None
         if used_base_url:
             dialog_info = _get_dialog_info_for_session(used_base_url, session_id)
             if dialog_info:
@@ -517,6 +538,11 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                     or dialog_info.get("dialog_id")
                     or dialog_info.get("CHAT_ID")
                     or dialog_info.get("chat_id")
+                )
+                guest_user_id = (
+                    dialog_info.get("USER_ID")
+                    or dialog_info.get("user_id")
+                    or dialog_info.get("CLIENT_ID")
                 )
                 guest_name = " ".join(
                     filter(
@@ -537,6 +563,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                 response_dialog_id = normalized
 
         result = data.get("result") or {}
+        user_map = _extract_user_map(result)
         messages = result.get("MESSAGES") or result.get("messages") or []
         if not messages:
             if dialog_id_for_history:
@@ -552,6 +579,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                     if "result" in im_data:
                         im_result = im_data.get("result") or {}
                         messages = im_result.get("messages") or im_result.get("MESSAGES") or []
+                        user_map = _extract_user_map(im_result) or user_map
 
             if not messages:
                 _send(send_message, dialog_id, "История диалога пуста.", **kwargs)
@@ -583,15 +611,24 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
             if not cleaned_text:
                 continue
             author_name = None
-            if str(author).isdigit():
-                if author not in user_name_cache:
-                    user_name_cache[author] = _get_user_name(used_base_url, author)
-                author_name = user_name_cache.get(author)
-            speaker = author_name or guest_label
+            author_key = str(author)
+            if author_key in user_map:
+                author_name = user_map.get(author_key)
+            if author_name is None and author_key.isdigit():
+                if author_key not in user_name_cache:
+                    user_name_cache[author_key] = _get_user_name(used_base_url, author_key)
+                author_name = user_name_cache.get(author_key)
+            if guest_user_id is not None and str(guest_user_id) == author_key:
+                speaker = guest_label
+            else:
+                speaker = author_name or guest_label
             lines.append(f"{speaker}: {cleaned_text}")
-            incoming_flag = "✓" if speaker == guest_label else ""
-            outgoing_flag = "✓" if speaker != guest_label else ""
-            rows.append([session_id, incoming_flag, outgoing_flag, speaker, cleaned_text])
+            is_incoming = (guest_user_id is not None and str(guest_user_id) == author_key) or (
+                guest_user_id is None and speaker == guest_label
+            )
+            incoming_flag = "✓" if is_incoming else ""
+            outgoing_flag = "✓" if not is_incoming else ""
+            rows.append([session_id, msg_date, incoming_flag, outgoing_flag, speaker, cleaned_text])
         if not lines:
             _send(send_message, dialog_id, "В истории нет текстовых сообщений.", **kwargs)
             return
@@ -603,7 +640,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
 
         if folder_id and chat_id and used_base_url:
             file_name = f"dialogs_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            headers = ["dialog_id", "Входящее", "Исходящее", "Имя", "сообщение"]
+            headers = ["dialog_id", "Дата", "Входящее", "Исходящее", "Имя", "сообщение"]
             content_bytes = _build_xlsx_bytes(headers, rows)
             disk_id = _upload_file_to_bitrix_disk(
                 used_base_url,
