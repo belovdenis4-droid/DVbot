@@ -224,11 +224,54 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
         result = data.get("result") or {}
         messages = result.get("MESSAGES") or result.get("messages") or []
         if not messages:
-            _send(send_message, dialog_id, "История диалога пуста.", **kwargs)
-            return
+            dialog_id_for_history = None
+            try:
+                dialog_res = requests.post(
+                    f"{url_base.rstrip('/')}/imopenlines.dialog.get.json",
+                    json={"SESSION_ID": session_id},
+                    timeout=30,
+                )
+                dialog_res.raise_for_status()
+                dialog_data = dialog_res.json()
+                if "result" in dialog_data:
+                    dialog_result = dialog_data.get("result") or {}
+                    dialog_id_for_history = (
+                        dialog_result.get("DIALOG_ID")
+                        or dialog_result.get("dialog_id")
+                        or dialog_result.get("CHAT_ID")
+                        or dialog_result.get("chat_id")
+                    )
+            except Exception:
+                dialog_id_for_history = None
+
+            if dialog_id_for_history:
+                dialog_id_str = str(dialog_id_for_history)
+                if dialog_id_str.isdigit():
+                    dialog_id_str = f"chat{dialog_id_str}"
+                im_res = requests.post(
+                    f"{url_base.rstrip('/')}/im.dialog.messages.get.json",
+                    json={"DIALOG_ID": dialog_id_str, "FIRST_ID": 0, "LIMIT": 200},
+                    timeout=30,
+                )
+                if im_res.status_code != 404:
+                    im_res.raise_for_status()
+                    im_data = im_res.json()
+                    if "result" in im_data:
+                        im_result = im_data.get("result") or {}
+                        messages = im_result.get("messages") or im_result.get("MESSAGES") or []
+
+            if not messages:
+                _send(send_message, dialog_id, "История диалога пуста.", **kwargs)
+                return
         lines = []
         for msg in messages:
-            text = (msg.get("MESSAGE") or msg.get("message") or "").strip()
+            text = (
+                msg.get("MESSAGE")
+                or msg.get("message")
+                or msg.get("text")
+                or msg.get("TEXT")
+                or ""
+            ).strip()
             if not text:
                 continue
             author = msg.get("AUTHOR_ID") or msg.get("author_id") or "?"
