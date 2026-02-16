@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import logging
 import os
 import re
@@ -354,6 +355,12 @@ def _is_operator_marker(text):
     return "отправлено из мессенджера" in lowered or "отправлено роботом" in lowered
 
 
+def _normalize_name(value):
+    if not value:
+        return ""
+    return " ".join(str(value).lower().split())
+
+
 def _get_user_name(base_url, user_id):
     if not base_url or not user_id or not str(user_id).isdigit():
         return None
@@ -622,6 +629,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                     user_name_cache[author_key] = _get_user_name(used_base_url, author_key)
                 author_name = user_name_cache.get(author_key)
             is_guest_by_id = guest_user_id is not None and str(guest_user_id) == author_key
+            guest_label_norm = _normalize_name(guest_label)
             if _is_operator_marker(cleaned_text):
                 speaker = "Оператор"
                 direction = "Исх"
@@ -630,9 +638,32 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                     speaker = guest_label
                 else:
                     speaker = author_name or guest_label
-                direction = "Вх" if speaker == guest_label else "Исх"
+                speaker_norm = _normalize_name(speaker)
+                author_norm = _normalize_name(author_name)
+                is_guest_by_name = (
+                    guest_label_norm
+                    and (speaker_norm == guest_label_norm or author_norm == guest_label_norm)
+                ) or (
+                    guest_label_norm
+                    and (guest_label_norm in speaker_norm or speaker_norm in guest_label_norm)
+                )
+                direction = "Вх" if is_guest_by_id or is_guest_by_name else "Исх"
             lines.append(f"{speaker}: {cleaned_text}")
-            rows.append([session_id, msg_date, direction, speaker, cleaned_text])
+            raw_message = json.dumps(msg, ensure_ascii=False, sort_keys=True)
+            rows.append(
+                [
+                    session_id,
+                    msg_date,
+                    direction,
+                    speaker,
+                    cleaned_text,
+                    "",
+                    "",
+                    "",
+                    "",
+                    raw_message,
+                ]
+            )
         if not lines:
             _send(send_message, dialog_id, "В истории нет текстовых сообщений.", **kwargs)
             return
@@ -644,7 +675,18 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
 
         if folder_id and chat_id and used_base_url:
             file_name = f"dialogs_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            headers = ["dialog_id", "Дата", "Направление", "Имя", "сообщение"]
+            headers = [
+                "dialog_id",
+                "Дата",
+                "Направление",
+                "Имя",
+                "сообщение",
+                "reserved_6",
+                "reserved_7",
+                "reserved_8",
+                "reserved_9",
+                "raw_message",
+            ]
             content_bytes = _build_xlsx_bytes(headers, rows)
             disk_id = _upload_file_to_bitrix_disk(
                 used_base_url,
