@@ -1251,13 +1251,19 @@ def bitrix_webhook():
         command_text = message_text.lower()
         is_text_command = command_text in ["статус", "chat_id", "chatid", "помощь", "help", "sud"]
 
+        dialogs_pending = (
+            message_text.lower().startswith("dialogs")
+            or dialog_id_for_response in PENDING_DIALOGS_FILE
+        )
+        files_base_url = (BITRIX_OLBOT_WEBHOOK_URL or BITRIX_URL) if is_olbot_request else BITRIX_URL
+
         # Если из payload не удалось — пробуем получить сообщение через API
         if not files_data and (has_file_hints or not is_text_command):
             try:
-                msg_url = f"{BITRIX_URL.rstrip('/')}/im.message.getById.json"
+                msg_url = f"{files_base_url.rstrip('/')}/im.message.getById.json"
                 msg_res = requests.get(msg_url, params={"ID": message_id})
                 if msg_res.status_code == 404:
-                    alt_url = f"{BITRIX_URL.rstrip('/')}/im.message.get.json"
+                    alt_url = f"{files_base_url.rstrip('/')}/im.message.get.json"
                     msg_res = requests.get(alt_url, params={"MESSAGE_ID": message_id})
                 msg_res.raise_for_status()
                 msg_json = msg_res.json()
@@ -1294,13 +1300,13 @@ def bitrix_webhook():
             valid_file_ids = [f_id for f_id in files_data.keys() if str(f_id).isdigit()]
             if not valid_file_ids:
                 logger.info("Нет корректных числовых ID файлов в событии.")
-            else:
+            elif not dialogs_pending:
                 bitrix_send_message(dialog_id_for_response, "⏳ Начинаю распознавание файла...")
 
             for f_id in valid_file_ids:
                 try:
                     # Получаем URL для скачивания файла
-                    disk_file_info_url = f"{BITRIX_URL.rstrip('/')}/disk.file.get.json"
+                    disk_file_info_url = f"{files_base_url.rstrip('/')}/disk.file.get.json"
                     disk_file_response = requests.post(disk_file_info_url, json={"id": f_id})
                     if not disk_file_response.ok:
                         logger.info(f"Пропускаю файл ID={f_id}: {disk_file_response.status_code}")
@@ -1322,19 +1328,19 @@ def bitrix_webhook():
                     f_res.raise_for_status()
                     with open(path, "wb") as f: f.write(f_res.content)
 
-                    if file_ext in ["csv", "xlsx"] and (
-                        message_text.lower().startswith("dialogs")
-                        or dialog_id_for_response in PENDING_DIALOGS_FILE
-                    ):
+                    if file_ext in ["csv", "xlsx"] and dialogs_pending:
                         handle_dialogs_file(
                             path,
                             dialog_id_for_response,
                             bitrix_send_message,
-                            base_url=BITRIX_OLBOT_WEBHOOK_URL or BITRIX_URL,
+                            base_url=files_base_url,
                             bot_id=BITRIX_OLBOT_ID or BITRIX_BOT_ID,
                             client_id=BITRIX_OLBOT_CLIENT_ID,
                         )
                         PENDING_DIALOGS_FILE.discard(dialog_id_for_response)
+                        if os.path.exists(path):
+                            os.remove(path)
+                        return "OK", 200
                     elif file_ext == "pdf":
                         md = get_text_llama_parse(path)
                         count = process_and_save(md)
