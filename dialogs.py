@@ -44,6 +44,10 @@ def _iter_base_urls(primary_url):
             yield url
 
 
+def _get_disk_base_url(fallback_url):
+    return os.environ.get("BITRIX_WEBHOOK_URL") or fallback_url
+
+
 def _extract_session_id(item):
     for key in ("ID", "id", "SESSION_ID", "session_id"):
         value = item.get(key)
@@ -690,18 +694,19 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
         client_id = kwargs.get("client_id")
         folder_id = os.environ.get("BITRIX_DIALOGS_FOLDER_ID")
         chat_id = _extract_chat_id(dialog_id)
+        upload_base_url = _get_disk_base_url(used_base_url)
 
-        if folder_id and chat_id and used_base_url:
+        if folder_id and chat_id and upload_base_url:
             file_name = f"dialogs_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
             headers = ["dialog_id", "Дата", "Направление", "Имя", "сообщение"]
             content_bytes = _build_xlsx_bytes(headers, rows)
             disk_id = _upload_file_to_bitrix_disk(
-                used_base_url,
+                upload_base_url,
                 folder_id,
                 file_name,
                 content_bytes,
             )
-            if disk_id and _commit_file_to_chat(used_base_url, chat_id, disk_id, message="История диалога"):
+            if disk_id and _commit_file_to_chat(upload_base_url, chat_id, disk_id, message="История диалога"):
                 _send(
                     send_message,
                     response_dialog_id,
@@ -750,15 +755,16 @@ def handle_dialogs_file(file_path, dialog_id, send_message, **kwargs):
 
     folder_id = os.environ.get("BITRIX_DIALOGS_FOLDER_ID")
     chat_id = _extract_chat_id(dialog_id)
-    if not folder_id or not chat_id or not used_base_url:
+    upload_base_url = _get_disk_base_url(used_base_url)
+    if not folder_id or not chat_id or not upload_base_url:
         _send(send_message, dialog_id, "Не удалось отправить файл (нет Disk-параметров).", **kwargs)
         return
 
     file_name = f"dialogs_batch_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
     headers = ["dialog_id", "Дата", "Направление", "Имя", "сообщение"]
     content_bytes = _build_xlsx_bytes(headers, all_rows)
-    disk_id = _upload_file_to_bitrix_disk(used_base_url, folder_id, file_name, content_bytes)
-    if disk_id and _commit_file_to_chat(used_base_url, chat_id, disk_id, message="История диалогов"):
+    disk_id = _upload_file_to_bitrix_disk(upload_base_url, folder_id, file_name, content_bytes)
+    if disk_id and _commit_file_to_chat(upload_base_url, chat_id, disk_id, message="История диалогов"):
         _send(send_message, dialog_id, "Файл диалогов создан.", **kwargs)
     else:
         _send(send_message, dialog_id, "Не удалось отправить файл диалогов.", **kwargs)
@@ -792,15 +798,16 @@ def handle_dialogs_ids(message_text, dialog_id, send_message, **kwargs):
 
     folder_id = os.environ.get("BITRIX_DIALOGS_FOLDER_ID")
     chat_id = _extract_chat_id(dialog_id)
-    if not folder_id or not chat_id or not used_base_url:
+    upload_base_url = _get_disk_base_url(used_base_url)
+    if not folder_id or not chat_id or not upload_base_url:
         _send(send_message, dialog_id, "Не удалось отправить файл (нет Disk-параметров).", **kwargs)
         return
 
     file_name = f"dialogs_batch_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx"
     headers = ["dialog_id", "Дата", "Направление", "Имя", "сообщение"]
     content_bytes = _build_xlsx_bytes(headers, all_rows)
-    disk_id = _upload_file_to_bitrix_disk(used_base_url, folder_id, file_name, content_bytes)
-    if disk_id and _commit_file_to_chat(used_base_url, chat_id, disk_id, message="История диалогов"):
+    disk_id = _upload_file_to_bitrix_disk(upload_base_url, folder_id, file_name, content_bytes)
+    if disk_id and _commit_file_to_chat(upload_base_url, chat_id, disk_id, message="История диалогов"):
         _send(send_message, dialog_id, "Файл диалогов создан.", **kwargs)
     else:
         _send(send_message, dialog_id, "Не удалось отправить файл диалогов.", **kwargs)
