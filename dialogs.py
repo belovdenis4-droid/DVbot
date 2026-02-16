@@ -92,6 +92,39 @@ def _extract_client_label(item):
     return "?"
 
 
+def _normalize_dialog_id(value):
+    if value is None:
+        return None
+    dialog_id = str(value).strip()
+    if dialog_id.isdigit():
+        return f"chat{dialog_id}"
+    return dialog_id
+
+
+def _get_dialog_id_for_session(base_url, session_id):
+    try:
+        res = requests.post(
+            f"{base_url.rstrip('/')}/imopenlines.dialog.get.json",
+            json={"SESSION_ID": session_id},
+            timeout=30,
+        )
+        if res.status_code == 404:
+            return None
+        res.raise_for_status()
+        data = res.json()
+        if "result" not in data:
+            return None
+        result = data.get("result") or {}
+        return (
+            result.get("DIALOG_ID")
+            or result.get("dialog_id")
+            or result.get("CHAT_ID")
+            or result.get("chat_id")
+        )
+    except Exception:
+        return None
+
+
 def _send_dialogs_list(dialog_id, send_message, base_url, **kwargs):
     date_from = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     start = 0
@@ -198,6 +231,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
     try:
         data = None
         last_error = None
+        used_base_url = None
         for url_base in _iter_base_urls(base_url):
             url = f"{url_base.rstrip('/')}/imopenlines.session.history.get.json"
             res = requests.post(url, json={"SESSION_ID": session_id}, timeout=30)
@@ -210,6 +244,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                 err = data.get("error_description") or data.get("error") or "Unknown error"
                 _send(send_message, dialog_id, f"Ошибка Bitrix: {err}", **kwargs)
                 return
+            used_base_url = url_base
             break
 
         if data is None:
@@ -221,35 +256,21 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
             )
             return
 
+        response_dialog_id = dialog_id
+        dialog_id_for_history = None
+        if used_base_url:
+            dialog_id_for_history = _get_dialog_id_for_session(used_base_url, session_id)
+            normalized = _normalize_dialog_id(dialog_id_for_history)
+            if normalized:
+                response_dialog_id = normalized
+
         result = data.get("result") or {}
         messages = result.get("MESSAGES") or result.get("messages") or []
         if not messages:
-            dialog_id_for_history = None
-            try:
-                dialog_res = requests.post(
-                    f"{url_base.rstrip('/')}/imopenlines.dialog.get.json",
-                    json={"SESSION_ID": session_id},
-                    timeout=30,
-                )
-                dialog_res.raise_for_status()
-                dialog_data = dialog_res.json()
-                if "result" in dialog_data:
-                    dialog_result = dialog_data.get("result") or {}
-                    dialog_id_for_history = (
-                        dialog_result.get("DIALOG_ID")
-                        or dialog_result.get("dialog_id")
-                        or dialog_result.get("CHAT_ID")
-                        or dialog_result.get("chat_id")
-                    )
-            except Exception:
-                dialog_id_for_history = None
-
             if dialog_id_for_history:
-                dialog_id_str = str(dialog_id_for_history)
-                if dialog_id_str.isdigit():
-                    dialog_id_str = f"chat{dialog_id_str}"
+                dialog_id_str = _normalize_dialog_id(dialog_id_for_history)
                 im_res = requests.post(
-                    f"{url_base.rstrip('/')}/im.dialog.messages.get.json",
+                    f"{used_base_url.rstrip('/')}/im.dialog.messages.get.json",
                     json={"DIALOG_ID": dialog_id_str, "FIRST_ID": 0, "LIMIT": 200},
                     timeout=30,
                 )
@@ -281,6 +302,6 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
             return
         output = "\n".join(lines)
         for chunk in _chunk_text(output):
-            _send(send_message, dialog_id, chunk, **kwargs)
+            _send(send_message, response_dialog_id, chunk, **kwargs)
     except Exception as e:
         _send(send_message, dialog_id, f"Ошибка получения истории: {e}", **kwargs)
