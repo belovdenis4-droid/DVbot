@@ -1117,6 +1117,8 @@ def bitrix_webhook():
                     response_text = "База знаний не загружена."
                     if errors:
                         response_text = f"{response_text} {errors}"
+            elif message_text.strip().lower() == "dialogs":
+                response_text = "ready"
             else:
                 kb_answer = build_kb_response(message_text)
                 response_text = (
