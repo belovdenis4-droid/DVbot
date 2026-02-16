@@ -612,6 +612,12 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                 content_bytes,
             )
             if disk_id and _commit_file_to_chat(used_base_url, chat_id, disk_id, message="История диалога"):
+                _send(
+                    send_message,
+                    response_dialog_id,
+                    "Файл диалогов создан.",
+                    **kwargs,
+                )
                 return
 
         for chunk in _chunk_text(output):
