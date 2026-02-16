@@ -125,6 +125,30 @@ def _get_dialog_id_for_session(base_url, session_id):
         return None
 
 
+def _send_openlines_session_message(base_url, session_id, text, bot_id=None, client_id=None):
+    if not base_url or not session_id or not bot_id:
+        return False
+    try:
+        url = f"{base_url.rstrip('/')}/imopenlines.bot.session.message.send.json"
+        payload = {
+            "BOT_ID": bot_id,
+            "SESSION_ID": session_id,
+            "MESSAGE": text,
+        }
+        if client_id:
+            payload["CLIENT_ID"] = client_id
+        res = requests.post(url, json=payload, timeout=30)
+        if res.status_code == 404:
+            return False
+        res.raise_for_status()
+        data = res.json()
+        if "result" in data:
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def _send_dialogs_list(dialog_id, send_message, base_url, **kwargs):
     date_from = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
     start = 0
@@ -301,7 +325,17 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
             _send(send_message, dialog_id, "В истории нет текстовых сообщений.", **kwargs)
             return
         output = "\n".join(lines)
+        bot_id = kwargs.get("bot_id")
+        client_id = kwargs.get("client_id")
         for chunk in _chunk_text(output):
-            _send(send_message, response_dialog_id, chunk, **kwargs)
+            sent = _send_openlines_session_message(
+                used_base_url,
+                session_id,
+                chunk,
+                bot_id=bot_id,
+                client_id=client_id,
+            )
+            if not sent:
+                _send(send_message, response_dialog_id, chunk, **kwargs)
     except Exception as e:
         _send(send_message, dialog_id, f"Ошибка получения истории: {e}", **kwargs)
