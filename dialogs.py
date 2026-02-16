@@ -1,5 +1,7 @@
+import base64
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import requests
 
@@ -123,6 +125,57 @@ def _get_dialog_id_for_session(base_url, session_id):
         )
     except Exception:
         return None
+
+
+def _extract_chat_id(value):
+    if value is None:
+        return None
+    dialog_id = str(value).strip()
+    if dialog_id.startswith("chat") and dialog_id[4:].isdigit():
+        return int(dialog_id[4:])
+    if dialog_id.isdigit():
+        return int(dialog_id)
+    return None
+
+
+def _upload_file_to_bitrix_disk(base_url, folder_id, file_name, content_bytes):
+    if not base_url or not folder_id:
+        return None
+    try:
+        url = f"{base_url.rstrip('/')}/disk.folder.uploadfile.json"
+        payload = {
+            "id": folder_id,
+            "data": {"NAME": file_name},
+            "fileContent": [file_name, base64.b64encode(content_bytes).decode("ascii")],
+        }
+        res = requests.post(url, json=payload, timeout=60)
+        if res.status_code == 404:
+            return None
+        res.raise_for_status()
+        data = res.json()
+        result = data.get("result") or {}
+        disk_id = result.get("ID") or result.get("id") or result.get("DISK_ID")
+        return str(disk_id) if disk_id else None
+    except Exception:
+        return None
+
+
+def _commit_file_to_chat(base_url, chat_id, disk_id, message=None):
+    if not base_url or not chat_id or not disk_id:
+        return False
+    try:
+        url = f"{base_url.rstrip('/')}/im.disk.file.commit.json"
+        payload = {"CHAT_ID": chat_id, "DISK_ID": disk_id}
+        if message:
+            payload["MESSAGE"] = message
+        res = requests.post(url, json=payload, timeout=30)
+        if res.status_code == 404:
+            return False
+        res.raise_for_status()
+        data = res.json()
+        return data.get("result") is True
+    except Exception:
+        return False
 
 
 def _send_openlines_session_message(base_url, session_id, text, bot_id=None, client_id=None):
@@ -327,6 +380,26 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
         output = "\n".join(lines)
         bot_id = kwargs.get("bot_id")
         client_id = kwargs.get("client_id")
+        folder_id = os.environ.get("BITRIX_DIALOGS_FOLDER_ID")
+        chat_id = _extract_chat_id(response_dialog_id)
+
+        if folder_id and chat_id and used_base_url:
+            file_name = f"dialogs_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.txt"
+            Path("downloads").mkdir(exist_ok=True)
+            file_path = Path("downloads") / file_name
+            file_path.write_text(output, encoding="utf-8")
+            disk_id = _upload_file_to_bitrix_disk(used_base_url, folder_id, file_name, file_path.read_bytes())
+            if disk_id and _commit_file_to_chat(used_base_url, chat_id, disk_id, message="История диалога"):
+                try:
+                    file_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return
+            try:
+                file_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
         for chunk in _chunk_text(output):
             sent = _send_openlines_session_message(
                 used_base_url,
