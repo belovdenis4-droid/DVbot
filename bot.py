@@ -1255,7 +1255,10 @@ def bitrix_webhook():
             message_text.lower().startswith("dialogs")
             or dialog_id_for_response in PENDING_DIALOGS_FILE
         )
-        files_base_url = (BITRIX_OLBOT_WEBHOOK_URL or BITRIX_URL) if is_olbot_request else BITRIX_URL
+        if dialogs_pending and BITRIX_URL:
+            files_base_url = BITRIX_URL
+        else:
+            files_base_url = (BITRIX_OLBOT_WEBHOOK_URL or BITRIX_URL) if is_olbot_request else BITRIX_URL
 
         # Если из payload не удалось — пробуем получить сообщение через API
         if not files_data and (has_file_hints or not is_text_command):
@@ -1306,24 +1309,41 @@ def bitrix_webhook():
             for f_id in valid_file_ids:
                 try:
                     # Получаем URL для скачивания файла
-                    disk_file_info_url = f"{files_base_url.rstrip('/')}/disk.file.get.json"
-                    disk_file_response = requests.post(disk_file_info_url, json={"id": f_id})
-                    if not disk_file_response.ok and BITRIX_URL and files_base_url != BITRIX_URL:
-                        # Fallback to main webhook if OL bot lacks Disk scope
-                        fallback_url = f"{BITRIX_URL.rstrip('/')}/disk.file.get.json"
-                        disk_file_response = requests.post(fallback_url, json={"id": f_id})
-                    if not disk_file_response.ok:
-                        logger.info(f"Пропускаю файл ID={f_id}: {disk_file_response.status_code}")
-                        continue
-                    
-                    disk_file_data = disk_file_response.json().get('result', {})
-                    download_url = disk_file_data.get('DOWNLOAD_URL')
-                    file_name = disk_file_data.get('NAME', f'bx_{f_id}.pdf')
-                    
-                    if not download_url:
-                        logger.info(f"Пропускаю файл без ссылки: {file_name}.")
-                        continue
+                    file_meta = files_data.get(f_id) if isinstance(files_data, dict) else None
+                    candidate_ids = [str(f_id)]
+                    download_url = None
+                    if isinstance(file_meta, dict):
+                        for key in ["DOWNLOAD_URL", "downloadUrl", "DOWNLOAD", "LINK", "URL", "url"]:
+                            value = file_meta.get(key)
+                            if value:
+                                download_url = value
+                                break
+                        for key in ["id", "ID", "disk_id", "DISK_ID", "fileId", "FILE_ID"]:
+                            value = file_meta.get(key)
+                            if value is not None and str(value).isdigit():
+                                candidate_ids.append(str(value))
+                    candidate_ids = list(dict.fromkeys(candidate_ids))
 
+                    if not download_url:
+                        disk_file_response = None
+                        for candidate_id in candidate_ids:
+                            disk_file_info_url = f"{files_base_url.rstrip('/')}/disk.file.get.json"
+                            disk_file_response = requests.post(disk_file_info_url, json={"id": candidate_id})
+                            if disk_file_response.ok:
+                                break
+                        if not disk_file_response or not disk_file_response.ok:
+                            status = disk_file_response.status_code if disk_file_response else "no_response"
+                            logger.info(f"Пропускаю файл ID={f_id}: {status}")
+                            continue
+                        disk_file_data = disk_file_response.json().get('result', {})
+                        download_url = disk_file_data.get('DOWNLOAD_URL')
+                        file_name = disk_file_data.get('NAME', f'bx_{f_id}.pdf')
+                        if not download_url:
+                            logger.info(f"Пропускаю файл без ссылки: {file_name}.")
+                            continue
+                    else:
+                        file_name = file_meta.get('NAME', f'bx_{f_id}.pdf') if isinstance(file_meta, dict) else f'bx_{f_id}.pdf'
+                    
                     file_ext = file_name.lower().rsplit(".", 1)[-1] if "." in file_name else ""
                     path = f"downloads/{file_name}"
                     Path("downloads").mkdir(exist_ok=True)
