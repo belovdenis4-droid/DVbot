@@ -194,19 +194,33 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
 
     session_id = parts[1]
     base_url = _get_base_url(**kwargs)
-    if not base_url:
-        _send(send_message, dialog_id, "Не задан BITRIX_OPENLINES_WEBHOOK_URL.", **kwargs)
-        return
 
-    url = f"{base_url.rstrip('/')}/imopenlines.session.history.get.json"
     try:
-        res = requests.post(url, json={"SESSION_ID": session_id}, timeout=30)
-        res.raise_for_status()
-        data = res.json()
-        if "result" not in data:
-            err = data.get("error_description") or data.get("error") or "Unknown error"
-            _send(send_message, dialog_id, f"Ошибка Bitrix: {err}", **kwargs)
+        data = None
+        last_error = None
+        for url_base in _iter_base_urls(base_url):
+            url = f"{url_base.rstrip('/')}/imopenlines.session.history.get.json"
+            res = requests.post(url, json={"SESSION_ID": session_id}, timeout=30)
+            if res.status_code == 404:
+                last_error = f"404 Not Found for url: {url}"
+                continue
+            res.raise_for_status()
+            data = res.json()
+            if "result" not in data:
+                err = data.get("error_description") or data.get("error") or "Unknown error"
+                _send(send_message, dialog_id, f"Ошибка Bitrix: {err}", **kwargs)
+                return
+            break
+
+        if data is None:
+            _send(
+                send_message,
+                dialog_id,
+                f"Ошибка получения истории: {last_error or 'Unknown error'}",
+                **kwargs,
+            )
             return
+
         result = data.get("result") or {}
         messages = result.get("MESSAGES") or result.get("messages") or []
         if not messages:
