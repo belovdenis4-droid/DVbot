@@ -360,6 +360,16 @@ def _normalize_name(value):
     return " ".join(str(value).lower().split())
 
 
+def _get_operator_names():
+    raw = os.environ.get("BITRIX_OPERATOR_NAMES", "")
+    names = {_normalize_name("Оператор")}
+    for part in raw.split(","):
+        normalized = _normalize_name(part)
+        if normalized:
+            names.add(normalized)
+    return names
+
+
 def _get_user_name(base_url, user_id):
     if not base_url or not user_id or not str(user_id).isdigit():
         return None
@@ -596,6 +606,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
         lines = []
         rows = []
         user_name_cache = {}
+        operator_names = _get_operator_names()
         for msg in messages:
             text = (
                 msg.get("MESSAGE")
@@ -617,7 +628,7 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
                 or ""
             )
             cleaned_text = _strip_bbcode(text)
-            if not cleaned_text:
+            if not cleaned_text or not cleaned_text.strip():
                 continue
             author_name = None
             author_key = str(author)
@@ -631,23 +642,26 @@ def handle_dialogs_command(dialog_id, send_message, message_text=None, **kwargs)
             guest_label_norm = _normalize_name(guest_label)
             if _is_operator_marker(cleaned_text):
                 speaker = "Оператор"
-                direction = "Исх"
             else:
                 if is_guest_by_id:
                     speaker = guest_label
                 else:
                     speaker = author_name or guest_label
-                speaker_norm = _normalize_name(speaker)
-                author_norm = _normalize_name(author_name)
-                is_guest_by_name = (
-                    guest_label_norm
-                    and (speaker_norm == guest_label_norm or author_norm == guest_label_norm)
-                ) or (
-                    guest_label_norm
-                    and (guest_label_norm in speaker_norm or speaker_norm in guest_label_norm)
-                )
-                is_ours = author_key in user_map
-                direction = "Вх" if (is_guest_by_id or is_guest_by_name or not is_ours) else "Исх"
+
+            speaker_norm = _normalize_name(speaker)
+            author_norm = _normalize_name(author_name)
+            is_guest_by_name = (
+                guest_label_norm
+                and (speaker_norm == guest_label_norm or author_norm == guest_label_norm)
+            ) or (
+                guest_label_norm
+                and (guest_label_norm in speaker_norm or speaker_norm in guest_label_norm)
+            )
+            if is_guest_by_id or is_guest_by_name:
+                speaker = guest_label
+                speaker_norm = guest_label_norm
+
+            direction = "Исх" if speaker_norm in operator_names else "Вх"
             lines.append(f"{speaker}: {cleaned_text}")
             rows.append([session_id, msg_date, direction, speaker, cleaned_text])
         if not lines:
