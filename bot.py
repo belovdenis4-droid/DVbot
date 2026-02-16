@@ -239,7 +239,10 @@ def _extract_text_from_coze_payload(payload):
     if payload is None:
         return ""
     if isinstance(payload, str):
-        return payload.strip()
+        text = payload.strip()
+        if text.startswith("aweme://"):
+            return ""
+        return text
     if isinstance(payload, list):
         for item in payload:
             text = _extract_text_from_coze_payload(item)
@@ -250,7 +253,10 @@ def _extract_text_from_coze_payload(payload):
         for key in ["content", "text", "value"]:
             val = payload.get(key)
             if isinstance(val, str) and val.strip():
-                return val.strip()
+                text = val.strip()
+                if text.startswith("aweme://"):
+                    continue
+                return text
         for val in payload.values():
             text = _extract_text_from_coze_payload(val)
             if text:
@@ -421,14 +427,22 @@ def _generate_ai_response(question, kb_text, source_name):
             for msg in messages:
                 if msg.get("type") == "answer":
                     content = msg.get("content", "")
-                    if isinstance(content, str) and content.strip().startswith("{"):
+                    data_field = msg.get("data", "")
+                    answer = _extract_text_from_coze_payload(content)
+                    if not answer and data_field:
                         try:
-                            content_json = json.loads(content)
+                            content_json = data_field
+                            if isinstance(data_field, str) and data_field.strip().startswith("{"):
+                                content_json = json.loads(data_field)
                             answer = _extract_text_from_coze_payload(content_json)
                         except Exception:
-                            answer = content
-                    else:
-                        answer = _extract_text_from_coze_payload(content)
+                            answer = ""
+                    if answer:
+                        break
+            if not answer:
+                for msg in messages:
+                    content = msg.get("content", "")
+                    answer = _extract_text_from_coze_payload(content)
                     if answer:
                         break
             if answer:
@@ -1320,6 +1334,9 @@ def bitrix_webhook():
                 except Exception as e:
                     response = f"✅ Система работает. Ошибка получения данных с основного листа: {e}"
                 bitrix_send_message(dialog_id_for_response, response)
+
+            elif message_text.lower() == "dialogs":
+                bitrix_send_message(dialog_id_for_response, "ready")
 
             elif message_text.lower() in ["chat_id", "chatid"]: 
                 bitrix_send_message(
