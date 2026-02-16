@@ -23,7 +23,14 @@ def _get_base_url(**kwargs):
 
 def _iter_base_urls(primary_url):
     seen = set()
-    for url in [primary_url, OPENLINES_WEBHOOK_URL, os.environ.get("BITRIX_WEBHOOK_URL")]:
+    candidates = [
+        os.environ.get("BITRIX_OPENLINES_WEBHOOK_URL"),
+        os.environ.get("BITRIX_WEBHOOK_URL"),
+        primary_url,
+        OPENLINES_WEBHOOK_URL,
+        os.environ.get("BITRIX_OLBOT_WEBHOOK_URL"),
+    ]
+    for url in candidates:
         if url and url not in seen:
             seen.add(url)
             yield url
