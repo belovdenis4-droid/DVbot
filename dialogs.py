@@ -164,6 +164,21 @@ def _commit_file_to_chat(base_url, chat_id, disk_id, message=None):
         return False
 
 
+def _get_disk_download_url(base_url, disk_id):
+    if not base_url or not disk_id:
+        return None
+    try:
+        url = f"{base_url.rstrip('/')}/disk.file.get.json"
+        res = requests.post(url, json={"id": disk_id}, timeout=30)
+        if not res.ok:
+            return None
+        data = res.json()
+        result = data.get("result") or {}
+        return result.get("DOWNLOAD_URL")
+    except Exception:
+        return None
+
+
 def _send_openlines_session_message(base_url, session_id, text, bot_id=None, client_id=None):
     if not base_url or not session_id or not bot_id:
         return False
@@ -767,7 +782,11 @@ def handle_dialogs_file(file_path, dialog_id, send_message, **kwargs):
     if disk_id and _commit_file_to_chat(upload_base_url, chat_id, disk_id, message="История диалогов"):
         _send(send_message, dialog_id, "Файл диалогов создан.", **kwargs)
     else:
-        _send(send_message, dialog_id, "Не удалось отправить файл диалогов.", **kwargs)
+        download_url = _get_disk_download_url(upload_base_url, disk_id)
+        if download_url:
+            _send(send_message, dialog_id, f"Файл диалогов создан: {download_url}", **kwargs)
+        else:
+            _send(send_message, dialog_id, "Не удалось отправить файл диалогов.", **kwargs)
     if errors:
         _send(send_message, dialog_id, "Ошибки:\n" + "\n".join(errors[:20]), **kwargs)
 
@@ -810,6 +829,10 @@ def handle_dialogs_ids(message_text, dialog_id, send_message, **kwargs):
     if disk_id and _commit_file_to_chat(upload_base_url, chat_id, disk_id, message="История диалогов"):
         _send(send_message, dialog_id, "Файл диалогов создан.", **kwargs)
     else:
-        _send(send_message, dialog_id, "Не удалось отправить файл диалогов.", **kwargs)
+        download_url = _get_disk_download_url(upload_base_url, disk_id)
+        if download_url:
+            _send(send_message, dialog_id, f"Файл диалогов создан: {download_url}", **kwargs)
+        else:
+            _send(send_message, dialog_id, "Не удалось отправить файл диалогов.", **kwargs)
     if errors:
         _send(send_message, dialog_id, "Ошибки:\n" + "\n".join(errors[:20]), **kwargs)
